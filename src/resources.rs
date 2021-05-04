@@ -1,6 +1,6 @@
-use std::any::{Any, TypeId};
+use std::any::{type_name, Any, TypeId};
 use std::cell::{Ref, RefCell, RefMut};
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Default)]
@@ -11,8 +11,10 @@ impl Resources {
     where
         R: 'static,
     {
-        self.0
-            .insert(TypeId::of::<R>(), RefCell::new(Box::new(res)));
+        match self.0.entry(TypeId::of::<R>()) {
+            Entry::Vacant(entry) => entry.insert(RefCell::new(Box::new(res))),
+            Entry::Occupied(_) => panic!("Resource {} already present", type_name::<R>()),
+        };
     }
 }
 

@@ -18,10 +18,7 @@ where
     S: QuerySpec,
 {
     fn default() -> Self {
-        Self {
-            refs: Default::default(),
-            vals: Default::default(),
-        }
+        Self::new()
     }
 }
 
@@ -29,6 +26,13 @@ impl<S> Query<S>
 where
     S: QuerySpec,
 {
+    pub fn new() -> Self {
+        Self {
+            refs: Default::default(),
+            vals: Default::default(),
+        }
+    }
+
     pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
         let refs: &'q mut Refs<'q, S> = unsafe { transmute(&mut self.refs) };
         debug_assert!(refs.is_empty());

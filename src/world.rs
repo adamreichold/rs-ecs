@@ -18,6 +18,12 @@ pub struct World {
 
 impl Default for World {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl World {
+    pub fn new() -> Self {
         Self {
             entities: Default::default(),
             archetypes: vec![Archetype::new(vec![TypeMetadata::of::<Entity>()].into())],
@@ -89,6 +95,10 @@ impl World {
 }
 
 impl World {
+    pub(crate) fn archetypes(&self) -> &[Archetype] {
+        &self.archetypes[1..]
+    }
+
     pub fn insert<B>(&mut self, ent: Entity, comps: B)
     where
         B: Bundle,
@@ -241,12 +251,6 @@ impl World {
         R: 'static,
     {
         self.resources.get_mut::<R>()
-    }
-}
-
-impl World {
-    pub(crate) fn archetypes(&self) -> &[Archetype] {
-        &self.archetypes[1..]
     }
 }
 

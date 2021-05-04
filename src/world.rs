@@ -316,7 +316,7 @@ impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 
 #[test]
 fn it_works() {
-    let mut world = World::default();
+    let mut world = World::new();
 
     let _1st = world.alloc();
     world.insert(_1st, (23_i32, 42_u64));

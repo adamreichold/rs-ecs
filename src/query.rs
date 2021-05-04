@@ -62,6 +62,26 @@ where
             ptr: S::Fetch::dangling(),
         }
     }
+
+    pub fn with<C>(self) -> Query<With<S, C>>
+    where
+        C: 'static,
+    {
+        Query {
+            refs: self.refs,
+            vals: self.vals,
+        }
+    }
+
+    pub fn without<C>(self) -> Query<Without<S, C>>
+    where
+        C: 'static,
+    {
+        Query {
+            refs: self.refs,
+            vals: self.vals,
+        }
+    }
 }
 
 pub trait QuerySpec {
@@ -197,6 +217,92 @@ where
     }
 }
 
+pub struct With<S, C>(PhantomData<(S, C)>);
+
+impl<S, C> QuerySpec for With<S, C>
+where
+    S: QuerySpec,
+    C: 'static,
+{
+    type Fetch = FetchWith<S::Fetch, C>;
+}
+
+pub struct FetchWith<F, C>(PhantomData<(F, C)>);
+
+unsafe impl<'q, F, C> Fetch<'q> for FetchWith<F, C>
+where
+    F: Fetch<'q>,
+    C: 'static,
+{
+    type Ty = F::Ty;
+    type Ref = F::Ref;
+    type Ptr = F::Ptr;
+
+    type Item = F::Item;
+
+    fn find(archetype: &Archetype) -> Option<Self::Ty> {
+        match archetype.find::<C>() {
+            Some(_) => F::find(archetype),
+            None => None,
+        }
+    }
+
+    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+        F::borrow(archetype, ty)
+    }
+
+    fn dangling() -> Self::Ptr {
+        F::dangling()
+    }
+
+    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
+        F::get(ptr, idx)
+    }
+}
+
+pub struct Without<S, C>(PhantomData<(S, C)>);
+
+impl<S, C> QuerySpec for Without<S, C>
+where
+    S: QuerySpec,
+    C: 'static,
+{
+    type Fetch = FetchWithout<S::Fetch, C>;
+}
+
+pub struct FetchWithout<F, C>(PhantomData<(F, C)>);
+
+unsafe impl<'q, F, C> Fetch<'q> for FetchWithout<F, C>
+where
+    F: Fetch<'q>,
+    C: 'static,
+{
+    type Ty = F::Ty;
+    type Ref = F::Ref;
+    type Ptr = F::Ptr;
+
+    type Item = F::Item;
+
+    fn find(archetype: &Archetype) -> Option<Self::Ty> {
+        match archetype.find::<C>() {
+            None => F::find(archetype),
+            Some(_) => None,
+        }
+    }
+
+    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+        F::borrow(archetype, ty)
+    }
+
+    fn dangling() -> Self::Ptr {
+        F::dangling()
+    }
+
+    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
+        F::get(ptr, idx)
+    }
+}
+
 macro_rules! impl_fetch_for_tuples {
     () => {};
 
@@ -315,9 +421,9 @@ where
 
 #[test]
 fn it_works() {
-    use crate::world::{Entity, World};
+    use crate::world::Entity;
 
-    let mut world = World::default();
+    let mut world = World::new();
 
     let _1st = world.alloc();
     world.insert(_1st, (23_i32, 42_u64));
@@ -328,7 +434,7 @@ fn it_works() {
     let _3rd = world.alloc();
     world.insert(_3rd, (42_i32, 23_u64, true));
 
-    let mut query = Query::<(&Entity, &mut i32)>::default();
+    let mut query = Query::<(&Entity, &mut i32)>::new();
     let mut entities = Vec::new();
 
     for (ent, val) in query.iter(&world) {
@@ -351,7 +457,7 @@ fn it_works() {
         assert_eq!(entities, vec![_1st, _2nd, _3rd]);
     }
 
-    let mut query = Query::<(Option<&bool>,)>::default();
+    let mut query = Query::<(Option<&bool>,)>::new();
     let mut some = 0;
     let mut none = 0;
 
@@ -367,4 +473,9 @@ fn it_works() {
 
     assert_eq!(some, 1);
     assert_eq!(none, 2);
+
+    let mut query = Query::<&i32>::new().without::<bool>();
+    let sum = query.iter(&world).sum::<i32>();
+
+    assert_eq!(sum, -23 - 1);
 }

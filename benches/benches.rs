@@ -10,7 +10,7 @@ struct Vel(f32);
 
 #[bench]
 fn alloc_free(bencher: &mut Bencher) {
-    let mut world = World::default();
+    let mut world = World::new();
 
     bencher.iter(|| {
         let world = black_box(&mut world);
@@ -23,7 +23,7 @@ fn alloc_free(bencher: &mut Bencher) {
 
 #[bench]
 fn insert_remove(bencher: &mut Bencher) {
-    let mut world = World::default();
+    let mut world = World::new();
 
     let mut entities = Vec::new();
     let mut entity_idx = 0;
@@ -49,8 +49,8 @@ fn insert_remove(bencher: &mut Bencher) {
 
 #[bench]
 fn query(bencher: &mut Bencher) {
-    let mut world = World::default();
-    let mut query = Query::<(&mut Pos, &Vel)>::default();
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
 
     for _ in 0..131072 {
         let ent = world.alloc();

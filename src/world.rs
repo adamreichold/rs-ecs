@@ -127,7 +127,7 @@ impl World {
         }
     }
 
-    pub fn remove<C>(&mut self, ent: Entity) -> C
+    pub fn remove<C>(&mut self, ent: Entity) -> Option<C>
     where
         C: Bundle,
     {
@@ -140,7 +140,7 @@ impl World {
             new_ty = *pos;
         } else {
             let mut types = self.archetypes[meta.ty as usize].types().to_vec();
-            C::remove(&mut types);
+            C::remove(&mut types)?;
 
             let pos = self
                 .archetypes
@@ -163,7 +163,7 @@ impl World {
 
             self.move_(ent.id, meta.ty, new_ty, meta.idx);
 
-            comp
+            Some(comp)
         }
     }
 
@@ -255,7 +255,7 @@ struct EntityMetadata {
 
 pub unsafe trait Bundle: 'static {
     fn insert(types: &mut Vec<TypeMetadata>);
-    fn remove(types: &mut Vec<TypeMetadata>);
+    fn remove(types: &mut Vec<TypeMetadata>) -> Option<()>;
     unsafe fn write(self, archetype: &mut Archetype, idx: u32);
     unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self;
 }
@@ -277,8 +277,10 @@ macro_rules! impl_bundle_for_tuples {
                 $(TypeMetadata::insert::<$types>(types);)+
             }
 
-            fn remove(types: &mut Vec<TypeMetadata>) {
-                $(TypeMetadata::remove::<$types>(types);)+
+            fn remove(types: &mut Vec<TypeMetadata>) -> Option<()> {
+                $(TypeMetadata::remove::<$types>(types)?;)+
+
+                Some(())
             }
 
             #[allow(non_snake_case)]

@@ -364,14 +364,16 @@ impl TypeMetadata {
         types.insert(ty, TypeMetadata::of::<T>());
     }
 
-    pub fn remove<T>(types: &mut Vec<Self>)
+    pub fn remove<T>(types: &mut Vec<Self>) -> Option<()>
     where
         T: 'static,
     {
         let ty = types
             .binary_search_by_key(&TypeId::of::<T>(), |ty| ty.id)
-            .unwrap();
+            .ok()?;
 
         types.remove(ty);
+
+        Some(())
     }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "rs-ecs"
+description = "reasonbly simple entity component system"
+version = "0.1.0"
+edition = "2018"
+authors = ["Adam Reichold <adam.reichold@t-online.de>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/adamreichold/rs-ecs"
+
+[profile.bench]
+debug = true
+lto = true
+codegen-units = 1

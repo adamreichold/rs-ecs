@@ -89,20 +89,20 @@ impl World {
 }
 
 impl World {
-    pub fn insert<C>(&mut self, ent: Entity, comp: C)
+    pub fn insert<B>(&mut self, ent: Entity, comps: B)
     where
-        C: Bundle,
+        B: Bundle,
     {
         let meta = self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
 
         let new_ty;
 
-        if let Some(pos) = self.insert_map.get(&(meta.ty, TypeId::of::<C>())) {
+        if let Some(pos) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
             new_ty = *pos;
         } else {
             let mut types = self.archetypes[meta.ty as usize].types().to_vec();
-            C::insert(&mut types);
+            B::insert(&mut types);
 
             let pos = self
                 .archetypes
@@ -116,31 +116,31 @@ impl World {
                 self.archetypes.push(Archetype::new(types.into()));
             }
 
-            self.insert_map.insert((meta.ty, TypeId::of::<C>()), new_ty);
-            self.remove_map.insert((new_ty, TypeId::of::<C>()), meta.ty);
+            self.insert_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
+            self.remove_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
         }
 
         unsafe {
             let new_idx = self.move_(ent.id, meta.ty, new_ty, meta.idx);
 
-            comp.write(&mut self.archetypes[new_ty as usize], new_idx);
+            comps.write(&mut self.archetypes[new_ty as usize], new_idx);
         }
     }
 
-    pub fn remove<C>(&mut self, ent: Entity) -> Option<C>
+    pub fn remove<B>(&mut self, ent: Entity) -> Option<B>
     where
-        C: Bundle,
+        B: Bundle,
     {
         let meta = self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
 
         let new_ty;
 
-        if let Some(pos) = self.remove_map.get(&(meta.ty, TypeId::of::<C>())) {
+        if let Some(pos) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
             new_ty = *pos;
         } else {
             let mut types = self.archetypes[meta.ty as usize].types().to_vec();
-            C::remove(&mut types)?;
+            B::remove(&mut types)?;
 
             let pos = self
                 .archetypes
@@ -154,16 +154,16 @@ impl World {
                 self.archetypes.push(Archetype::new(types.into()));
             }
 
-            self.remove_map.insert((meta.ty, TypeId::of::<C>()), new_ty);
-            self.insert_map.insert((new_ty, TypeId::of::<C>()), meta.ty);
+            self.remove_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
+            self.insert_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
         }
 
         unsafe {
-            let comp = C::read(&mut self.archetypes[meta.ty as usize], meta.idx);
+            let comps = B::read(&mut self.archetypes[meta.ty as usize], meta.idx);
 
             self.move_(ent.id, meta.ty, new_ty, meta.idx);
 
-            Some(comp)
+            Some(comps)
         }
     }
 

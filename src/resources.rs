@@ -25,7 +25,9 @@ impl Resources {
     {
         let ref_ = self.0[&TypeId::of::<R>()].borrow();
 
-        Res(Ref::map(ref_, |ref_| ref_.downcast_ref().unwrap()))
+        Res(Ref::map(ref_, |ref_| unsafe {
+            &*(ref_.deref() as *const dyn Any as *const R)
+        }))
     }
 
     pub fn get_mut<R>(&self) -> ResMut<'_, R>
@@ -34,7 +36,9 @@ impl Resources {
     {
         let ref_ = self.0[&TypeId::of::<R>()].borrow_mut();
 
-        ResMut(RefMut::map(ref_, |ref_| ref_.downcast_mut().unwrap()))
+        ResMut(RefMut::map(ref_, |ref_| unsafe {
+            &mut *(ref_.deref_mut() as *mut dyn Any as *mut R)
+        }))
     }
 }
 

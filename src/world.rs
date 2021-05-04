@@ -190,6 +190,16 @@ impl World {
 }
 
 impl World {
+    pub fn contains<C>(&self, ent: Entity) -> bool
+    where
+        C: 'static,
+    {
+        let meta = &self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen);
+
+        self.archetypes[meta.ty as usize].find::<C>().is_some()
+    }
+
     pub fn get<C>(&self, ent: Entity) -> Option<Comp<'_, C>>
     where
         C: 'static,

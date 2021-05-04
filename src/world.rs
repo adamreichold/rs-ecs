@@ -64,8 +64,8 @@ impl World {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
 
-        meta.gen += 1;
-        ent.gen += 1;
+        meta.gen = meta.gen.checked_add(1).unwrap();
+        ent.gen = meta.gen;
 
         let free_list = &mut self.archetypes[0];
 

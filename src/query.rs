@@ -416,6 +416,7 @@ where
 {
     fn drop(&mut self) {
         self.refs.clear();
+        self.vals.clear();
     }
 }
 

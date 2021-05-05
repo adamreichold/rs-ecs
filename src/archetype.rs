@@ -1,6 +1,7 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::any::TypeId;
 use std::cell::{Ref, RefCell, RefMut, UnsafeCell};
+use std::cmp::Reverse;
 use std::ops::{Deref, DerefMut};
 use std::ptr::{copy_nonoverlapping, NonNull};
 
@@ -82,7 +83,8 @@ impl Archetype {
 
         let old_offsets = self.types.iter().map(|ty| ty.offset).collect::<Vec<_>>();
 
-        self.types.sort_unstable_by_key(|ty| ty.layout.align());
+        self.types
+            .sort_unstable_by_key(|ty| Reverse(ty.layout.align()));
 
         let mut max_align = 1;
         let mut sum_size = 0;

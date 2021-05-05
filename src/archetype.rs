@@ -14,7 +14,7 @@ pub struct Archetype {
 }
 
 impl Archetype {
-    pub fn new(types: Box<[TypeMetadata]>) -> Self {
+    pub fn new(types: Vec<TypeMetadata>) -> Self {
         let borrows = types.iter().map(|_| Default::default()).collect();
 
         let max_align = types.iter().map(|ty| ty.layout.align()).max().unwrap_or(1);
@@ -23,7 +23,7 @@ impl Archetype {
         let ptr = NonNull::new(max_align as *mut u8).unwrap();
 
         Self {
-            types,
+            types: types.into(),
             borrows,
             layout,
             len: 0,
@@ -137,8 +137,8 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub fn types(&self) -> &[TypeMetadata] {
-        &self.types
+    pub fn types(&self) -> Vec<TypeMetadata> {
+        self.types.to_vec()
     }
 
     pub fn match_(&self, types: &[TypeMetadata]) -> bool {
@@ -328,16 +328,16 @@ impl<C> DerefMut for CompMut<'_, C> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct TypeMetadata {
     id: TypeId,
     layout: Layout,
-    offset: usize,
     drop: unsafe fn(*mut u8),
+    offset: usize,
 }
 
 impl TypeMetadata {
-    pub fn of<T>() -> Self
+    pub fn new<T>() -> Self
     where
         T: 'static,
     {
@@ -348,8 +348,8 @@ impl TypeMetadata {
         Self {
             id: TypeId::of::<T>(),
             layout: Layout::new::<T>(),
-            offset: 0,
             drop: drop_in_place::<T>,
+            offset: 0,
         }
     }
 
@@ -361,7 +361,7 @@ impl TypeMetadata {
             .binary_search_by_key(&TypeId::of::<T>(), |ty| ty.id)
             .unwrap_err();
 
-        types.insert(ty, TypeMetadata::of::<T>());
+        types.insert(ty, TypeMetadata::new::<T>());
     }
 
     pub fn remove<T>(types: &mut Vec<Self>) -> Option<()>

@@ -1,7 +1,6 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::mem::replace;
 
 use crate::{
     archetype::{Archetype, Comp, CompMut, TypeMetadata},
@@ -10,6 +9,7 @@ use crate::{
 
 pub struct World {
     entities: Vec<EntityMetadata>,
+    free_list: Vec<u32>,
     archetypes: Vec<Archetype>,
     insert_map: HashMap<(u32, TypeId), u32>,
     remove_map: HashMap<(u32, TypeId), u32>,
@@ -24,9 +24,12 @@ impl Default for World {
 
 impl World {
     pub fn new() -> Self {
+        let empty_archetype = Archetype::new(vec![TypeMetadata::new::<Entity>()]);
+
         Self {
             entities: Default::default(),
-            archetypes: vec![Archetype::new(vec![TypeMetadata::of::<Entity>()].into())],
+            free_list: Default::default(),
+            archetypes: vec![empty_archetype],
             insert_map: Default::default(),
             remove_map: Default::default(),
             resources: Default::default(),
@@ -37,27 +40,29 @@ impl World {
 impl World {
     #[must_use]
     pub fn alloc(&mut self) -> Entity {
-        let free_list = &mut self.archetypes[0];
+        if let Some(id) = self.free_list.pop() {
+            let meta = &mut self.entities[id as usize];
 
-        if let Some(idx) = free_list.len().checked_sub(1) {
+            meta.idx = unsafe { self.archetypes[0].alloc() };
+
+            let ent = Entity { id, gen: meta.gen };
+
             unsafe {
-                let ent = free_list.read::<Entity>(idx);
-
-                debug_assert!(!free_list.free(idx, false));
-
-                ent
+                self.archetypes[0].write(meta.idx, ent);
             }
+
+            ent
         } else {
             let id = self.entities.len().try_into().unwrap();
             let gen = 0;
 
+            let ty = 0;
+            let idx = unsafe { self.archetypes[0].alloc() };
+
             let ent = Entity { id, gen };
 
-            let ty = 0;
-            let idx = unsafe { free_list.alloc() };
-
             unsafe {
-                free_list.write(idx, ent);
+                self.archetypes[0].write(idx, ent);
             }
 
             self.entities.push(EntityMetadata { gen, ty, idx });
@@ -73,24 +78,20 @@ impl World {
         meta.gen = meta.gen.checked_add(1).unwrap();
         ent.gen = meta.gen;
 
-        let free_list = &mut self.archetypes[0];
-
-        let old_ty = replace(&mut meta.ty, 0);
-        let old_idx = replace(&mut meta.idx, unsafe { free_list.alloc() });
-
-        unsafe {
-            free_list.write(meta.idx, ent);
-        }
+        let old_ty = meta.ty;
+        meta.ty = 0;
 
         let old_archetype = &mut self.archetypes[old_ty as usize];
 
         unsafe {
-            if old_archetype.free(old_idx, true) {
-                let moved_id = old_archetype.read::<Entity>(old_idx).id;
+            if old_archetype.free(meta.idx, true) {
+                let moved_id = old_archetype.read::<Entity>(meta.idx).id;
 
-                self.entities[moved_id as usize].idx = old_idx;
+                self.entities[moved_id as usize].idx = meta.idx;
             }
         }
+
+        self.free_list.push(ent.id);
     }
 }
 
@@ -111,7 +112,7 @@ impl World {
         if let Some(pos) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
             new_ty = *pos;
         } else {
-            let mut types = self.archetypes[meta.ty as usize].types().to_vec();
+            let mut types = self.archetypes[meta.ty as usize].types();
             B::insert(&mut types);
 
             let pos = self
@@ -122,8 +123,8 @@ impl World {
             if let Some(pos) = pos {
                 new_ty = pos as u32;
             } else {
-                new_ty = self.archetypes.len() as u32;
-                self.archetypes.push(Archetype::new(types.into()));
+                new_ty = self.archetypes.len().try_into().unwrap();
+                self.archetypes.push(Archetype::new(types));
             }
 
             self.insert_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
@@ -149,7 +150,7 @@ impl World {
         if let Some(pos) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
             new_ty = *pos;
         } else {
-            let mut types = self.archetypes[meta.ty as usize].types().to_vec();
+            let mut types = self.archetypes[meta.ty as usize].types();
             B::remove(&mut types)?;
 
             let pos = self
@@ -161,7 +162,7 @@ impl World {
                 new_ty = pos as u32;
             } else {
                 new_ty = self.archetypes.len() as u32;
-                self.archetypes.push(Archetype::new(types.into()));
+                self.archetypes.push(Archetype::new(types));
             }
 
             self.remove_map.insert((meta.ty, TypeId::of::<B>()), new_ty);

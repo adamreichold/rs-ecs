@@ -1,9 +1,13 @@
+use std::any::TypeId;
 use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
 use std::mem::transmute;
 use std::ptr::{null, null_mut};
 
-use crate::{archetype::Archetype, world::World};
+use crate::{
+    archetype::Archetype,
+    world::{Entity, World},
+};
 
 pub struct Query<S>
 where
@@ -162,6 +166,8 @@ where
     type Item = &'q mut C;
 
     fn find(archetype: &Archetype) -> Option<Self::Ty> {
+        assert_ne!(TypeId::of::<C>(), TypeId::of::<Entity>());
+
         archetype.find::<C>()
     }
 
@@ -422,8 +428,6 @@ where
 
 #[test]
 fn it_works() {
-    use crate::world::Entity;
-
     let mut world = World::new();
 
     let _1st = world.alloc();

@@ -73,9 +73,9 @@ impl World {
 
         unsafe {
             if old_archetype.free(meta.idx, true) {
-                let moved_id = old_archetype.read::<Entity>(meta.idx).id;
+                let moved_ent = old_archetype.read::<Entity>(meta.idx);
 
-                self.entities[moved_id as usize].idx = meta.idx;
+                self.entities[moved_ent.id as usize].idx = meta.idx;
             }
         }
 
@@ -175,9 +175,9 @@ impl World {
         Archetype::move_(old_archetype, new_archetype, old_idx, new_idx);
 
         if old_archetype.free(old_idx, false) {
-            let moved_id = old_archetype.read::<Entity>(old_idx).id;
+            let moved_ent = old_archetype.read::<Entity>(old_idx);
 
-            self.entities[moved_id as usize].idx = old_idx;
+            self.entities[moved_ent.id as usize].idx = old_idx;
         }
 
         let meta = &mut self.entities[id as usize];
@@ -213,6 +213,8 @@ impl World {
     where
         C: 'static,
     {
+        assert_ne!(TypeId::of::<C>(), TypeId::of::<Entity>());
+
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
 

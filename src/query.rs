@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
-use std::mem::transmute;
+use std::mem::{take, transmute};
 use std::ptr::{null, null_mut};
 
 use crate::{
@@ -13,8 +13,8 @@ pub struct Query<S>
 where
     S: QuerySpec,
 {
-    refs: Refs<'static, S>,
-    vals: Vals<'static, S>,
+    refs: Vec<<S::Fetch as Fetch<'static>>::Ref>,
+    vals: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
 }
 
 impl<S> Default for Query<S>
@@ -23,6 +23,15 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<S> Drop for Query<S>
+where
+    S: QuerySpec,
+{
+    fn drop(&mut self) {
+        assert!(self.refs.is_empty());
     }
 }
 
@@ -38,11 +47,12 @@ where
     }
 
     pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
-        debug_assert!(self.refs.is_empty());
-        debug_assert!(self.vals.is_empty());
+        assert!(self.refs.is_empty());
+        let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
 
-        let refs: &'q mut Refs<'q, S> = unsafe { transmute(&mut self.refs) };
-        let vals: &'q mut Vals<'q, S> = unsafe { transmute(&mut self.vals) };
+        self.vals.clear();
+        let vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
+            unsafe { transmute(&mut self.vals) };
 
         for archetype in world.archetypes() {
             let len = archetype.len();
@@ -67,24 +77,82 @@ where
         }
     }
 
-    pub fn with<C>(self) -> Query<With<S, C>>
+    pub fn with<C>(mut self) -> Query<With<S, C>>
     where
         C: 'static,
     {
         Query {
-            refs: self.refs,
-            vals: self.vals,
+            refs: take(&mut self.refs),
+            vals: take(&mut self.vals),
         }
     }
 
-    pub fn without<C>(self) -> Query<Without<S, C>>
+    pub fn without<C>(mut self) -> Query<Without<S, C>>
     where
         C: 'static,
     {
         Query {
-            refs: self.refs,
-            vals: self.vals,
+            refs: take(&mut self.refs),
+            vals: take(&mut self.vals),
         }
+    }
+}
+
+pub struct QueryIter<'q, S>
+where
+    S: QuerySpec,
+{
+    refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref>,
+    vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)>,
+    idx: u32,
+    len: u32,
+    ptr: <S::Fetch as Fetch<'q>>::Ptr,
+}
+
+impl<S> Drop for QueryIter<'_, S>
+where
+    S: QuerySpec,
+{
+    fn drop(&mut self) {
+        self.refs.clear();
+    }
+}
+
+impl<'q, S> Iterator for QueryIter<'q, S>
+where
+    S: QuerySpec,
+{
+    type Item = <S::Fetch as Fetch<'q>>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.idx != self.len {
+                let val = unsafe { S::Fetch::get(self.ptr, self.idx) };
+                self.idx += 1;
+                return Some(val);
+            } else {
+                let (len, ptr) = self.vals.pop()?;
+                self.idx = 0;
+                self.len = len;
+                self.ptr = ptr;
+                continue;
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<S> ExactSizeIterator for QueryIter<'_, S>
+where
+    S: QuerySpec,
+{
+    fn len(&self) -> usize {
+        let len = self.vals.iter().map(|(len, _)| *len).sum::<u32>() + self.len - self.idx;
+        len as usize
     }
 }
 
@@ -105,10 +173,6 @@ pub unsafe trait Fetch<'q> {
     fn dangling() -> Self::Ptr;
     unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item;
 }
-
-type Refs<'q, S> = Vec<<<S as QuerySpec>::Fetch as Fetch<'q>>::Ref>;
-
-type Vals<'q, S> = Vec<(u32, <<S as QuerySpec>::Fetch as Fetch<'q>>::Ptr)>;
 
 impl<'a, C> QuerySpec for &'a C
 where
@@ -366,65 +430,6 @@ macro_rules! impl_fetch_for_tuples {
 }
 
 impl_fetch_for_tuples!(A, B, C, D, E, F, G, H, I, J);
-
-pub struct QueryIter<'q, S>
-where
-    S: QuerySpec,
-{
-    refs: &'q mut Refs<'q, S>,
-    vals: &'q mut Vals<'q, S>,
-    idx: u32,
-    len: u32,
-    ptr: <S::Fetch as Fetch<'q>>::Ptr,
-}
-
-impl<'q, S> Iterator for QueryIter<'q, S>
-where
-    S: QuerySpec,
-{
-    type Item = <S::Fetch as Fetch<'q>>::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.idx != self.len {
-                let val = unsafe { S::Fetch::get(self.ptr, self.idx) };
-                self.idx += 1;
-                return Some(val);
-            } else {
-                let (len, ptr) = self.vals.pop()?;
-                self.idx = 0;
-                self.len = len;
-                self.ptr = ptr;
-                continue;
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
-        (len, Some(len))
-    }
-}
-
-impl<S> ExactSizeIterator for QueryIter<'_, S>
-where
-    S: QuerySpec,
-{
-    fn len(&self) -> usize {
-        let len = self.vals.iter().map(|(len, _)| *len).sum::<u32>() + self.len - self.idx;
-        len as usize
-    }
-}
-
-impl<S> Drop for QueryIter<'_, S>
-where
-    S: QuerySpec,
-{
-    fn drop(&mut self) {
-        self.refs.clear();
-        self.vals.clear();
-    }
-}
 
 #[test]
 fn it_works() {

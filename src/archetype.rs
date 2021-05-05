@@ -1,5 +1,5 @@
 use std::alloc::{alloc, dealloc, Layout};
-use std::any::TypeId;
+use std::any::{type_name, TypeId};
 use std::cell::{Ref, RefCell, RefMut, UnsafeCell};
 use std::cmp::Reverse;
 use std::ops::{Deref, DerefMut};
@@ -339,39 +339,40 @@ pub struct TypeMetadata {
 }
 
 impl TypeMetadata {
-    pub fn new<T>() -> Self
+    pub fn new<C>() -> Self
     where
-        T: 'static,
+        C: 'static,
     {
-        unsafe fn drop_in_place<T>(ptr: *mut u8) {
-            ptr.cast::<T>().drop_in_place()
+        unsafe fn drop_in_place<C>(ptr: *mut u8) {
+            ptr.cast::<C>().drop_in_place()
         }
 
         Self {
-            id: TypeId::of::<T>(),
-            layout: Layout::new::<T>(),
-            drop: drop_in_place::<T>,
+            id: TypeId::of::<C>(),
+            layout: Layout::new::<C>(),
+            drop: drop_in_place::<C>,
             offset: 0,
         }
     }
 
-    pub fn insert<T>(types: &mut Vec<Self>)
+    pub fn insert<C>(types: &mut Vec<Self>)
     where
-        T: 'static,
+        C: 'static,
     {
-        let ty = types
-            .binary_search_by_key(&TypeId::of::<T>(), |ty| ty.id)
-            .unwrap_err();
+        let ty = types.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id);
 
-        types.insert(ty, TypeMetadata::new::<T>());
+        match ty {
+            Err(ty) => types.insert(ty, TypeMetadata::new::<C>()),
+            Ok(_) => panic!("Component {} already present", type_name::<C>()),
+        }
     }
 
-    pub fn remove<T>(types: &mut Vec<Self>) -> Option<()>
+    pub fn remove<C>(types: &mut Vec<Self>) -> Option<()>
     where
-        T: 'static,
+        C: 'static,
     {
         let ty = types
-            .binary_search_by_key(&TypeId::of::<T>(), |ty| ty.id)
+            .binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id)
             .ok()?;
 
         types.remove(ty);

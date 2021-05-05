@@ -40,36 +40,26 @@ impl World {
 impl World {
     #[must_use]
     pub fn alloc(&mut self) -> Entity {
-        if let Some(id) = self.free_list.pop() {
-            let meta = &mut self.entities[id as usize];
-
-            meta.ty = 0;
-            meta.idx = unsafe { self.archetypes[0].alloc() };
-
-            let ent = Entity { id, gen: meta.gen };
-
-            unsafe {
-                self.archetypes[0].write(meta.idx, ent);
-            }
-
-            ent
+        let id = if let Some(id) = self.free_list.pop() {
+            id
         } else {
             let id = self.entities.len().try_into().unwrap();
-            let gen = 0;
+            self.entities.push(Default::default());
+            id
+        };
 
-            let ty = 0;
-            let idx = unsafe { self.archetypes[0].alloc() };
+        let meta = &mut self.entities[id as usize];
 
-            let ent = Entity { id, gen };
+        meta.ty = 0;
+        meta.idx = unsafe { self.archetypes[0].alloc() };
 
-            unsafe {
-                self.archetypes[0].write(idx, ent);
-            }
+        let ent = Entity { id, gen: meta.gen };
 
-            self.entities.push(EntityMetadata { gen, ty, idx });
-
-            ent
+        unsafe {
+            self.archetypes[0].write(meta.idx, ent);
         }
+
+        ent
     }
 
     pub fn free(&mut self, mut ent: Entity) {
@@ -259,7 +249,7 @@ pub struct Entity {
     gen: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct EntityMetadata {
     gen: u32,
     ty: u32,

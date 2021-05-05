@@ -13,6 +13,8 @@ pub struct Query<S>
 where
     S: QuerySpec,
 {
+    tag_gen: (u32, u32),
+    types: Vec<(*const Archetype, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<<S::Fetch as Fetch<'static>>::Ref>,
     vals: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
 }
@@ -41,12 +43,24 @@ where
 {
     pub fn new() -> Self {
         Self {
+            tag_gen: Default::default(),
+            types: Default::default(),
             refs: Default::default(),
             vals: Default::default(),
         }
     }
 
     pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
+        let tag_gen = world.tag_gen();
+        if self.tag_gen != tag_gen {
+            self.tag_gen = tag_gen;
+
+            self.find(world);
+        }
+
+        let types: &'q Vec<(*const Archetype, <S::Fetch as Fetch<'q>>::Ty)> =
+            unsafe { transmute(&self.types) };
+
         assert!(self.refs.is_empty());
         let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
 
@@ -54,18 +68,18 @@ where
         let vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
             unsafe { transmute(&mut self.vals) };
 
-        for archetype in world.archetypes() {
+        for (archetype, ty) in types {
+            let archetype = unsafe { &**archetype };
+
             let len = archetype.len();
             if len == 0 {
                 continue;
             }
 
-            if let Some(ty) = S::Fetch::find(archetype) {
-                let (ref_, ptr) = S::Fetch::borrow(archetype, ty);
+            let (ref_, ptr) = S::Fetch::borrow(archetype, *ty);
 
-                refs.push(ref_);
-                vals.push((len, ptr));
-            }
+            refs.push(ref_);
+            vals.push((len, ptr));
         }
 
         QueryIter {
@@ -77,11 +91,24 @@ where
         }
     }
 
+    #[cold]
+    fn find(&mut self, world: &World) {
+        self.types.clear();
+
+        for archetype in world.archetypes() {
+            if let Some(ty) = S::Fetch::find(archetype) {
+                self.types.push((archetype, ty));
+            }
+        }
+    }
+
     pub fn with<C>(mut self) -> Query<With<S, C>>
     where
         C: 'static,
     {
         Query {
+            tag_gen: Default::default(),
+            types: Default::default(),
             refs: take(&mut self.refs),
             vals: take(&mut self.vals),
         }
@@ -92,6 +119,8 @@ where
         C: 'static,
     {
         Query {
+            tag_gen: Default::default(),
+            types: Default::default(),
             refs: take(&mut self.refs),
             vals: take(&mut self.vals),
         }

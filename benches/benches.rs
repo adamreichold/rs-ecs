@@ -47,14 +47,47 @@ fn insert_remove(bencher: &mut Bencher) {
     })
 }
 
+fn spawn_two<const N: usize>(world: &mut World) {
+    let ent = world.alloc();
+    world.insert(ent, (Pos(0.), Vel(0.), [0; 1], [0; 2], [0; 3], [(); N]));
+
+    let ent = world.alloc();
+    world.insert(ent, (Pos(0.), [0; 4], [0; 5], [(); N]));
+}
+
 #[bench]
-fn query(bencher: &mut Bencher) {
+fn query_single_archetype(bencher: &mut Bencher) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
 
-    for _ in 0..131072 {
-        let ent = world.alloc();
-        world.insert(ent, (Pos(0.), Vel(0.)));
+    for _ in 0..1024 / 2 {
+        spawn_two::<0>(&mut world);
+    }
+
+    bencher.iter(|| {
+        let world = black_box(&world);
+        let query = black_box(&mut query);
+
+        for (pos, vel) in query.iter(world) {
+            pos.0 += vel.0;
+        }
+    });
+}
+
+#[bench]
+fn query_many_archetypes(bencher: &mut Bencher) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    for _ in 0..1024 / 2 / 8 {
+        spawn_two::<0>(&mut world);
+        spawn_two::<1>(&mut world);
+        spawn_two::<2>(&mut world);
+        spawn_two::<3>(&mut world);
+        spawn_two::<4>(&mut world);
+        spawn_two::<5>(&mut world);
+        spawn_two::<6>(&mut world);
+        spawn_two::<7>(&mut world);
     }
 
     bencher.iter(|| {

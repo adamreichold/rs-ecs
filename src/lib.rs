@@ -5,7 +5,7 @@ mod world;
 
 pub use crate::{
     archetype::{Comp, CompMut},
-    query::{Query, QueryIter, QuerySpec},
+    query::{Query, QueryIter, QuerySpec, With, Without},
     resources::{Res, ResMut},
     world::{Entity, World},
 };

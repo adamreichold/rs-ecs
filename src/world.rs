@@ -10,7 +10,6 @@ use crate::{
 
 pub struct World {
     tag: u32,
-    gen: u32,
     entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
     archetypes: Vec<Archetype>,
@@ -31,7 +30,6 @@ impl World {
 
         Self {
             tag: tag(),
-            gen: 0,
             entities: Default::default(),
             free_list: Default::default(),
             archetypes: vec![empty_archetype],
@@ -43,7 +41,7 @@ impl World {
 }
 
 fn tag() -> u32 {
-    static TAG: AtomicU32 = AtomicU32::new(1);
+    static TAG: AtomicU32 = AtomicU32::new(0);
 
     TAG.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |tag| {
         tag.checked_add(1)
@@ -99,7 +97,8 @@ impl World {
 
 impl World {
     pub(crate) fn tag_gen(&self) -> (u32, u32) {
-        (self.tag, self.gen)
+        debug_assert!(!self.archetypes.is_empty());
+        (self.tag, self.archetypes.len() as u32)
     }
 
     pub(crate) fn archetypes(&self) -> &[Archetype] {
@@ -129,9 +128,10 @@ impl World {
             if let Some(pos) = pos {
                 new_ty = pos as u32;
             } else {
-                self.gen = self.gen.checked_add(1).unwrap();
+                let len = self.archetypes.len();
+                assert!(len < u32::MAX as usize);
+                new_ty = len as u32;
 
-                new_ty = self.archetypes.len().try_into().unwrap();
                 self.archetypes.push(Archetype::new(types));
             }
 
@@ -169,9 +169,10 @@ impl World {
             if let Some(pos) = pos {
                 new_ty = pos as u32;
             } else {
-                self.gen = self.gen.checked_add(1).unwrap();
+                let len = self.archetypes.len();
+                assert!(len < u32::MAX as usize);
+                new_ty = len as u32;
 
-                new_ty = self.archetypes.len() as u32;
                 self.archetypes.push(Archetype::new(types));
             }
 

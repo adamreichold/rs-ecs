@@ -85,7 +85,7 @@ impl World {
 
 impl World {
     pub(crate) fn archetypes(&self) -> &[Archetype] {
-        &self.archetypes[1..]
+        &self.archetypes
     }
 
     pub fn insert<B>(&mut self, ent: Entity, comps: B)

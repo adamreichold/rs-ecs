@@ -7,6 +7,12 @@ use std::ops::{Deref, DerefMut};
 pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>>);
 
 impl Resources {
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl Resources {
     pub fn insert<R>(&mut self, res: R)
     where
         R: 'static,
@@ -70,7 +76,7 @@ impl<R> DerefMut for ResMut<'_, R> {
 
 #[test]
 fn it_works() {
-    let mut resources = Resources::default();
+    let mut resources = Resources::new();
 
     resources.insert(23_i32);
     resources.insert(42_u64);

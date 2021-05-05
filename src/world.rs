@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::{
-    archetype::{Archetype, Comp, CompMut, TypeMetadata},
-    resources::{Res, ResMut, Resources},
-};
+use crate::archetype::{Archetype, Comp, CompMut, TypeMetadata};
 
 pub struct World {
     tag: u32,
@@ -15,7 +12,6 @@ pub struct World {
     archetypes: Vec<Archetype>,
     insert_map: HashMap<(u32, TypeId), u32>,
     remove_map: HashMap<(u32, TypeId), u32>,
-    resources: Resources,
 }
 
 impl Default for World {
@@ -35,7 +31,6 @@ impl World {
             archetypes: vec![empty_archetype],
             insert_map: Default::default(),
             remove_map: Default::default(),
-            resources: Default::default(),
         }
     }
 }
@@ -242,29 +237,6 @@ impl World {
         assert_eq!(ent.gen, meta.gen);
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
-    }
-}
-
-impl World {
-    pub fn insert_resource<R>(&mut self, res: R)
-    where
-        R: 'static,
-    {
-        self.resources.insert(res);
-    }
-
-    pub fn get_resource<R>(&self) -> Res<'_, R>
-    where
-        R: 'static,
-    {
-        self.resources.get::<R>()
-    }
-
-    pub fn get_resource_mut<R>(&self) -> ResMut<'_, R>
-    where
-        R: 'static,
-    {
-        self.resources.get_mut::<R>()
     }
 }
 

@@ -76,7 +76,7 @@ where
                 continue;
             }
 
-            let (ref_, ptr) = S::Fetch::borrow(archetype, *ty);
+            let (ref_, ptr) = unsafe { S::Fetch::borrow(archetype, *ty) };
 
             refs.push(ref_);
             vals.push((len, ptr));
@@ -187,7 +187,7 @@ pub unsafe trait Fetch<'q> {
     type Item;
 
     fn find(archetype: &Archetype) -> Option<Self::Ty>;
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr);
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr);
 
     fn dangling() -> Self::Ptr;
     unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item;
@@ -216,7 +216,7 @@ where
         archetype.find::<C>()
     }
 
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
         archetype.borrow::<C>(ty)
     }
 
@@ -254,7 +254,7 @@ where
         archetype.find::<C>()
     }
 
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
         archetype.borrow_mut::<C>(ty)
     }
 
@@ -290,7 +290,7 @@ where
         Some(F::find(archetype))
     }
 
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
         ty.map_or((None, None), |ty| {
             let (ref_, ptr) = F::borrow(archetype, ty);
             (Some(ref_), Some(ptr))
@@ -336,7 +336,7 @@ where
         }
     }
 
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
         F::borrow(archetype, ty)
     }
 
@@ -379,7 +379,7 @@ where
         }
     }
 
-    fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
         F::borrow(archetype, ty)
     }
 
@@ -426,7 +426,7 @@ macro_rules! impl_fetch_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+            unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
                 let ($($types,)+) = ty;
 
                 $(let $types = $types::borrow(archetype, $types);)+

@@ -219,28 +219,30 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub fn borrow<C>(&self, ty: usize) -> (Ref<'_, ()>, *const C)
+    pub unsafe fn borrow<C>(&self, ty: usize) -> (Ref<'_, ()>, *const C)
     where
         C: 'static,
     {
-        let ref_ = self.borrows[ty].borrow();
+        debug_assert!(ty < self.types.len());
 
-        let ty = &self.types[ty];
+        let ref_ = self.borrows.get_unchecked(ty).borrow();
 
-        let ptr = unsafe { (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>() };
+        let ty = self.types.get_unchecked(ty);
+        let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)
     }
 
-    pub fn borrow_mut<C>(&self, ty: usize) -> (RefMut<'_, ()>, *mut C)
+    pub unsafe fn borrow_mut<C>(&self, ty: usize) -> (RefMut<'_, ()>, *mut C)
     where
         C: 'static,
     {
-        let ref_ = self.borrows[ty].borrow_mut();
+        debug_assert!(ty < self.types.len());
 
-        let ty = &self.types[ty];
+        let ref_ = self.borrows.get_unchecked(ty).borrow_mut();
 
-        let ptr = unsafe { (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>() };
+        let ty = self.types.get_unchecked(ty);
+        let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)
     }

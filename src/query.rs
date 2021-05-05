@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
-use std::mem::{take, transmute};
+use std::mem::transmute;
 use std::ptr::{null, null_mut};
 
 use crate::{
@@ -102,28 +102,18 @@ where
         }
     }
 
-    pub fn with<C>(mut self) -> Query<With<S, C>>
+    pub fn with<C>(self) -> Query<With<S, C>>
     where
         C: 'static,
     {
-        Query {
-            tag_gen: Default::default(),
-            types: Default::default(),
-            refs: take(&mut self.refs),
-            vals: take(&mut self.vals),
-        }
+        Query::new()
     }
 
-    pub fn without<C>(mut self) -> Query<Without<S, C>>
+    pub fn without<C>(self) -> Query<Without<S, C>>
     where
         C: 'static,
     {
-        Query {
-            tag_gen: Default::default(),
-            types: Default::default(),
-            refs: take(&mut self.refs),
-            vals: take(&mut self.vals),
-        }
+        Query::new()
     }
 }
 

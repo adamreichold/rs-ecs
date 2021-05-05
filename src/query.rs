@@ -34,11 +34,11 @@ where
     }
 
     pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
-        let refs: &'q mut Refs<'q, S> = unsafe { transmute(&mut self.refs) };
-        debug_assert!(refs.is_empty());
+        debug_assert!(self.refs.is_empty());
+        debug_assert!(self.vals.is_empty());
 
+        let refs: &'q mut Refs<'q, S> = unsafe { transmute(&mut self.refs) };
         let vals: &'q mut Vals<'q, S> = unsafe { transmute(&mut self.vals) };
-        debug_assert!(vals.is_empty());
 
         for archetype in world.archetypes() {
             let len = archetype.len();
@@ -88,27 +88,6 @@ pub trait QuerySpec {
     type Fetch: for<'a> Fetch<'a>;
 }
 
-impl<'a, C> QuerySpec for &'a C
-where
-    C: 'static,
-{
-    type Fetch = FetchRead<C>;
-}
-
-impl<'a, C> QuerySpec for &'a mut C
-where
-    C: 'static,
-{
-    type Fetch = FetchWrite<C>;
-}
-
-impl<S> QuerySpec for Option<S>
-where
-    S: QuerySpec,
-{
-    type Fetch = TryFetch<S::Fetch>;
-}
-
 pub unsafe trait Fetch<'q> {
     type Ty: Copy;
     type Ref;
@@ -126,6 +105,13 @@ pub unsafe trait Fetch<'q> {
 type Refs<'q, S> = Vec<<<S as QuerySpec>::Fetch as Fetch<'q>>::Ref>;
 
 type Vals<'q, S> = Vec<(u32, <<S as QuerySpec>::Fetch as Fetch<'q>>::Ptr)>;
+
+impl<'a, C> QuerySpec for &'a C
+where
+    C: 'static,
+{
+    type Fetch = FetchRead<C>;
+}
 
 pub struct FetchRead<C>(PhantomData<C>);
 
@@ -156,6 +142,13 @@ where
     }
 }
 
+impl<'a, C> QuerySpec for &'a mut C
+where
+    C: 'static,
+{
+    type Fetch = FetchWrite<C>;
+}
+
 pub struct FetchWrite<C>(PhantomData<C>);
 
 unsafe impl<'q, C> Fetch<'q> for FetchWrite<C>
@@ -183,6 +176,13 @@ where
     unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
         &mut *ptr.add(idx as usize)
     }
+}
+
+impl<S> QuerySpec for Option<S>
+where
+    S: QuerySpec,
+{
+    type Fetch = TryFetch<S::Fetch>;
 }
 
 pub struct TryFetch<F>(PhantomData<F>);

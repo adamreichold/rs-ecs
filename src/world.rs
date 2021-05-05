@@ -43,6 +43,7 @@ impl World {
         if let Some(id) = self.free_list.pop() {
             let meta = &mut self.entities[id as usize];
 
+            meta.ty = 0;
             meta.idx = unsafe { self.archetypes[0].alloc() };
 
             let ent = Entity { id, gen: meta.gen };
@@ -78,10 +79,7 @@ impl World {
         meta.gen = meta.gen.checked_add(1).unwrap();
         ent.gen = meta.gen;
 
-        let old_ty = meta.ty;
-        meta.ty = 0;
-
-        let old_archetype = &mut self.archetypes[old_ty as usize];
+        let old_archetype = &mut self.archetypes[meta.ty as usize];
 
         unsafe {
             if old_archetype.free(meta.idx, true) {
@@ -314,6 +312,19 @@ macro_rules! impl_bundle_for_tuples {
 }
 
 impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
+
+#[test]
+fn alloc_creates_unique_entities() {
+    let mut world = World::new();
+
+    let _1st = world.alloc();
+    let _2nd = world.alloc();
+    let _3rd = world.alloc();
+
+    assert_ne!(_1st, _2nd);
+    assert_ne!(_2nd, _3rd);
+    assert_ne!(_3rd, _1st);
+}
 
 #[test]
 fn it_works() {

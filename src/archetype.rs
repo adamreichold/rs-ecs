@@ -7,7 +7,6 @@ use std::ptr::{copy_nonoverlapping, NonNull};
 
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
-    borrows: Box<[RefCell<()>]>,
     layout: Layout,
     len: u32,
     cap: u32,
@@ -16,8 +15,6 @@ pub struct Archetype {
 
 impl Archetype {
     pub fn new(types: Vec<TypeMetadata>) -> Self {
-        let borrows = types.iter().map(|_| Default::default()).collect();
-
         let max_align = types.iter().map(|ty| ty.layout.align()).max().unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
@@ -25,7 +22,6 @@ impl Archetype {
 
         Self {
             types: types.into(),
-            borrows,
             layout,
             len: 0,
             cap: 0,
@@ -224,10 +220,9 @@ impl Archetype {
         C: 'static,
     {
         debug_assert!(ty < self.types.len());
-
-        let ref_ = self.borrows.get_unchecked(ty).borrow();
-
         let ty = self.types.get_unchecked(ty);
+
+        let ref_ = ty.borrow.borrow();
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)
@@ -238,10 +233,9 @@ impl Archetype {
         C: 'static,
     {
         debug_assert!(ty < self.types.len());
-
-        let ref_ = self.borrows.get_unchecked(ty).borrow_mut();
-
         let ty = self.types.get_unchecked(ty);
+
+        let ref_ = ty.borrow.borrow_mut();
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)
@@ -332,12 +326,24 @@ impl<C> DerefMut for CompMut<'_, C> {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct TypeMetadata {
     id: TypeId,
     layout: Layout,
     drop: unsafe fn(*mut u8),
     offset: usize,
+    borrow: RefCell<()>,
+}
+
+impl Clone for TypeMetadata {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            layout: self.layout,
+            drop: self.drop,
+            offset: 0,
+            borrow: Default::default(),
+        }
+    }
 }
 
 impl TypeMetadata {
@@ -354,6 +360,7 @@ impl TypeMetadata {
             layout: Layout::new::<C>(),
             drop: drop_in_place::<C>,
             offset: 0,
+            borrow: Default::default(),
         }
     }
 

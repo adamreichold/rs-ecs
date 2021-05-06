@@ -86,18 +86,13 @@ impl Archetype {
         let mut sum_size = 0;
         for ty in &mut *self.types {
             let align = ty.layout.align();
-            let size = ty.layout.size();
+            let size = aligned(ty.layout.size(), align);
+            let len = size.checked_mul(new_cap).unwrap();
 
             max_align = max_align.max(align);
 
-            ty.offset = sum_size;
-
-            let rest = ty.offset % align;
-            if rest != 0 {
-                ty.offset += align - rest;
-            }
-
-            sum_size = ty.offset + size.checked_mul(new_cap).unwrap();
+            ty.offset = aligned(sum_size, align);
+            sum_size = ty.offset.checked_add(len).unwrap();
         }
 
         self.types.sort_unstable_by_key(|ty| ty.id);
@@ -387,5 +382,14 @@ impl TypeMetadata {
         types.remove(ty);
 
         Some(())
+    }
+}
+
+fn aligned(val: usize, align: usize) -> usize {
+    let rest = val % align;
+    if rest != 0 {
+        val.checked_add(align - rest).unwrap()
+    } else {
+        val
     }
 }

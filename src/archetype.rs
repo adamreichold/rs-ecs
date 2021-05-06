@@ -79,12 +79,23 @@ impl Archetype {
 
         let old_offsets = self.types.iter().map(|ty| ty.offset).collect::<Vec<_>>();
 
-        self.types
+        struct SortOnDrop<'a>(&'a mut [TypeMetadata]);
+
+        impl Drop for SortOnDrop<'_> {
+            fn drop(&mut self) {
+                self.0.sort_unstable_by_key(|ty| ty.id);
+            }
+        }
+
+        let types = SortOnDrop(&mut self.types);
+
+        types
+            .0
             .sort_unstable_by_key(|ty| Reverse(ty.layout.align()));
 
         let mut max_align = 1;
         let mut sum_size = 0;
-        for ty in &mut *self.types {
+        for ty in types.0.iter_mut() {
             let align = ty.layout.align();
             let size = aligned(ty.layout.size(), align);
             let len = size.checked_mul(new_cap).unwrap();
@@ -95,7 +106,7 @@ impl Archetype {
             sum_size = ty.offset.checked_add(len).unwrap();
         }
 
-        self.types.sort_unstable_by_key(|ty| ty.id);
+        drop(types);
 
         let new_layout = Layout::from_size_align(sum_size, max_align).unwrap();
         let new_ptr;

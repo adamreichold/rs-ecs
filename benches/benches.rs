@@ -64,6 +64,8 @@ fn query_single_archetype(bencher: &mut Bencher) {
         spawn_two::<0>(&mut world);
     }
 
+    let _ = query.iter(&world);
+
     bencher.iter(|| {
         let world = black_box(&world);
         let query = black_box(&mut query);
@@ -89,6 +91,8 @@ fn query_many_archetypes(bencher: &mut Bencher) {
         spawn_two::<6>(&mut world);
         spawn_two::<7>(&mut world);
     }
+
+    let _ = query.iter(&world);
 
     bencher.iter(|| {
         let world = black_box(&world);

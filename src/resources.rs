@@ -1,10 +1,11 @@
 use std::any::{type_name, Any, TypeId};
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::hash_map::{Entry, HashMap};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Default)]
-pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>>);
+pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>, BuildHasherDefault<TypeIdHasher>>);
 
 impl Resources {
     pub fn new() -> Self {
@@ -71,6 +72,23 @@ impl<R> Deref for ResMut<'_, R> {
 impl<R> DerefMut for ResMut<'_, R> {
     fn deref_mut(&mut self) -> &mut R {
         self.0.deref_mut()
+    }
+}
+
+#[derive(Default)]
+struct TypeIdHasher(u64);
+
+impl Hasher for TypeIdHasher {
+    fn write_u64(&mut self, val: u64) {
+        self.0 = val;
+    }
+
+    fn write(&mut self, _val: &[u8]) {
+        unreachable!();
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
     }
 }
 

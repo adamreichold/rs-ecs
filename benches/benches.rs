@@ -26,7 +26,6 @@ fn insert_remove(bencher: &mut Bencher) {
     let mut world = World::new();
 
     let mut entities = Vec::new();
-    let mut entity_idx = 0;
 
     for _ in 0..1_024 {
         let ent = world.alloc();
@@ -34,16 +33,21 @@ fn insert_remove(bencher: &mut Bencher) {
         entities.push(ent);
     }
 
+    let mut idx = 0;
+
     bencher.iter(|| {
         let world = black_box(&mut world);
         let entities = black_box(&entities);
-        let entity_idx = black_box(&mut entity_idx);
+        let idx = black_box(&mut idx);
 
-        let ent = entities[*entity_idx];
-        *entity_idx = (*entity_idx + 1) % 1024;
+        let ent = entities[*idx];
+        *idx = (*idx + 1) % 1024;
 
         world.remove::<(Vel,)>(ent);
         world.insert(ent, (Vel(0.0),));
+
+        world.remove::<(Pos,)>(ent);
+        world.insert(ent, (Pos(0.0),));
     })
 }
 

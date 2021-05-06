@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadata};
@@ -10,8 +11,8 @@ pub struct World {
     entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
     archetypes: Vec<Archetype>,
-    insert_map: HashMap<(u32, TypeId), u32>,
-    remove_map: HashMap<(u32, TypeId), u32>,
+    insert_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
+    remove_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
 }
 
 impl Default for World {
@@ -299,6 +300,27 @@ macro_rules! impl_bundle_for_tuples {
 }
 
 impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
+
+#[derive(Default)]
+struct IndexTypeIdHasher(u64);
+
+impl Hasher for IndexTypeIdHasher {
+    fn write_u32(&mut self, val: u32) {
+        self.0 = 1 + val as u64;
+    }
+
+    fn write_u64(&mut self, val: u64) {
+        self.0 = self.0.wrapping_mul(val);
+    }
+
+    fn write(&mut self, _val: &[u8]) {
+        unreachable!();
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
 
 #[test]
 fn alloc_creates_unique_entities() {

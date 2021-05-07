@@ -1,6 +1,6 @@
 # rs-ecs
 
-A reasonably simple entity component system (ECS) developed for use in the simulation models of [project group EcoEpi](https://ecoepi.eu/) at the [Helmholtz Centre for Environmental Research](https://www.ufz.de/). The design is based on [hecs](https://github.com/Ralith/hecs) but it drops all optimisations which require additional API surface. Furthermore, it is _not_ thread-safe, uses prepared queries only and adds a type map used to hold resources.
+A reasonably simple entity component system (ECS) developed for use in the simulation models of [project group EcoEpi](https://ecoepi.eu/) at the [Helmholtz Centre for Environmental Research](https://www.ufz.de/). The design is based on [hecs](https://github.com/Ralith/hecs) but it is _not_ thread-safe and has a significantly reduced API surface.
 
 ## License
 

@@ -416,3 +416,20 @@ fn aligned(val: usize, align: usize) -> usize {
         val
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aligned_aligns() {
+        assert_eq!(aligned(0, 8), 0);
+        assert_eq!(aligned(1, 8), 8);
+        assert_eq!(aligned(7, 8), 8);
+        assert_eq!(aligned(8, 8), 8);
+        assert_eq!(aligned(9, 8), 16);
+        assert_eq!(aligned(0, 1), 0);
+        assert_eq!(aligned(1, 1), 1);
+        assert_eq!(aligned(2, 1), 2);
+    }
+}

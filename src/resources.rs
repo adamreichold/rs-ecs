@@ -92,23 +92,62 @@ impl Hasher for TypeIdHasher {
     }
 }
 
-#[test]
-fn it_works() {
-    let mut resources = Resources::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    resources.insert(23_i32);
-    resources.insert(42_u64);
+    #[test]
+    fn insert_then_get() {
+        let mut resources = Resources::new();
 
-    {
-        let val = resources.get::<u64>();
-        assert_eq!(*val, 42);
+        resources.insert(42_u64);
 
-        let mut val = resources.get_mut::<i32>();
-        *val *= -1;
+        let res = resources.get::<u64>();
+        assert_eq!(*res, 42);
     }
 
-    {
-        let val = resources.get::<i32>();
-        assert_eq!(*val, -23);
+    #[test]
+    fn get_mut_then_get() {
+        let mut resources = Resources::new();
+
+        resources.insert(42_u64);
+
+        {
+            let mut res = resources.get_mut::<u64>();
+            *res = 23;
+        }
+
+        let res = resources.get::<u64>();
+        assert_eq!(*res, 23);
+    }
+
+    #[test]
+    #[should_panic]
+    fn insert_does_not_replace() {
+        let mut resources = Resources::new();
+
+        resources.insert(23_i32);
+        resources.insert(42_i32);
+    }
+
+    #[test]
+    fn borrows_can_be_shared() {
+        let mut resources = Resources::new();
+
+        resources.insert(23_i32);
+
+        let _res = resources.get::<i32>();
+        let _res = resources.get::<i32>();
+    }
+
+    #[test]
+    #[should_panic]
+    fn mutable_borrows_are_exclusive() {
+        let mut resources = Resources::new();
+
+        resources.insert(23_i32);
+
+        let _res = resources.get_mut::<i32>();
+        let _res = resources.get_mut::<i32>();
     }
 }

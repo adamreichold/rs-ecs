@@ -225,7 +225,9 @@ impl World {
     where
         C: 'static,
     {
-        assert_ne!(TypeId::of::<C>(), TypeId::of::<Entity>());
+        if TypeId::of::<C>() == TypeId::of::<Entity>() {
+            panic!("Entity cannot be queried mutably");
+        }
 
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
@@ -316,69 +318,241 @@ impl Hasher for IndexTypeIdHasher {
     }
 }
 
-#[test]
-fn alloc_creates_unique_entities() {
-    let mut world = World::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let _1st = world.alloc();
-    let _2nd = world.alloc();
-    let _3rd = world.alloc();
+    #[test]
+    fn alloc_creates_unique_entities() {
+        let mut world = World::new();
 
-    assert_ne!(_1st, _2nd);
-    assert_ne!(_2nd, _3rd);
-    assert_ne!(_3rd, _1st);
-}
+        let ent1 = world.alloc();
+        let ent2 = world.alloc();
 
-#[test]
-fn it_works() {
-    let mut world = World::new();
+        world.free(ent1);
+        let ent3 = world.alloc();
 
-    let _1st = world.alloc();
-    world.insert(_1st, (23_i32, 42_u64));
+        assert_ne!(ent1, ent2);
+        assert_ne!(ent2, ent3);
 
-    let _2nd = world.alloc();
-    world.insert(_2nd, (1_u8,));
-
-    let _3rd = world.alloc();
-    world.insert(_3rd, (0_u8,));
-
-    let _4th = world.alloc();
-    world.insert(_4th, (42_i32, 23_u64));
-
-    {
-        let val = world.get::<i32>(_1st).unwrap();
-        assert_eq!(*val, 23);
-
-        let mut val = world.get_mut::<u64>(_1st).unwrap();
-        *val = 23;
+        assert_eq!(ent3.id, ent1.id);
+        assert_ne!(ent3.gen, ent1.gen);
     }
 
-    {
-        let val = world.get::<u8>(_2nd).unwrap();
-        assert_eq!(*val, 1);
+    #[test]
+    #[should_panic]
+    fn freed_entities_cannot_be_accessed() {
+        let mut world = World::new();
 
-        let val = world.get::<u64>(_1st).unwrap();
-        assert_eq!(*val, 23);
+        let ent = world.alloc();
+
+        world.get::<Entity>(ent).unwrap();
+
+        world.free(ent);
+
+        world.get::<Entity>(ent).unwrap();
     }
 
-    world.remove::<(i32,)>(_1st);
+    #[test]
+    fn entity_metadata_is_updated_after_compacting_archetypes() {
+        let mut world = World::new();
 
-    {
-        let val = world.get::<i32>(_1st);
-        assert!(val.is_none());
+        let ent1 = world.alloc();
+        let _ent2 = world.alloc();
+        let _ent3 = world.alloc();
 
-        let val = world.get::<u64>(_1st).unwrap();
-        assert_eq!(*val, 23);
+        assert_eq!(world.entities.len(), 3);
+        assert_eq!(world.entities[0].idx, 0);
+        assert_eq!(world.entities[1].idx, 1);
+        assert_eq!(world.entities[2].idx, 2);
+
+        assert_eq!(world.free_list.len(), 0);
+
+        world.free(ent1);
+
+        assert_eq!(world.entities.len(), 3);
+        assert_eq!(world.entities[1].idx, 1);
+        assert_eq!(world.entities[2].idx, 0);
+
+        assert_eq!(world.free_list.len(), 1);
+        assert_eq!(world.free_list[0], 0);
     }
 
-    world.free(_2nd);
+    #[test]
+    fn adding_component_creates_archetype() {
+        let mut world = World::new();
 
-    {
-        let val = world.get::<u8>(_3rd).unwrap();
-        assert_eq!(*val, 0);
+        assert_eq!(world.entities.len(), 0);
+
+        assert_eq!(world.archetypes.len(), 1);
+        assert_eq!(world.archetypes[0].len(), 0);
+
+        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.remove_map.len(), 0);
+
+        let ent = world.alloc();
+
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].ty, 0);
+        assert_eq!(world.entities[0].idx, 0);
+
+        assert_eq!(world.archetypes.len(), 1);
+        assert_eq!(world.archetypes[0].len(), 1);
+
+        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.remove_map.len(), 0);
+
+        world.insert(ent, (23_i32,));
+
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].ty, 1);
+        assert_eq!(world.entities[0].idx, 0);
+
+        assert_eq!(world.archetypes.len(), 2);
+        assert_eq!(world.archetypes[0].len(), 0);
+        assert_eq!(world.archetypes[1].len(), 1);
+
+        assert_eq!(world.insert_map.len(), 1);
+        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32,)>())], 1);
+
+        assert_eq!(world.remove_map.len(), 1);
+        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 0);
     }
 
-    let _5th = world.alloc();
-    assert_eq!(_2nd.id, _5th.id);
-    assert_ne!(_2nd.gen, _5th.gen);
+    #[test]
+    fn removing_component_creates_archetype() {
+        let mut world = World::new();
+
+        assert_eq!(world.entities.len(), 0);
+
+        assert_eq!(world.archetypes.len(), 1);
+        assert_eq!(world.archetypes[0].len(), 0);
+
+        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.remove_map.len(), 0);
+
+        let ent = world.alloc();
+
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].ty, 0);
+        assert_eq!(world.entities[0].idx, 0);
+
+        assert_eq!(world.archetypes.len(), 1);
+        assert_eq!(world.archetypes[0].len(), 1);
+
+        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.remove_map.len(), 0);
+
+        world.insert(ent, (23_i32, 42_u64));
+
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].ty, 1);
+        assert_eq!(world.entities[0].idx, 0);
+
+        assert_eq!(world.archetypes.len(), 2);
+        assert_eq!(world.archetypes[0].len(), 0);
+        assert_eq!(world.archetypes[1].len(), 1);
+
+        assert_eq!(world.insert_map.len(), 1);
+        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, u64)>())], 1);
+
+        assert_eq!(world.remove_map.len(), 1);
+        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32, u64)>())], 0);
+
+        world.remove::<(i32,)>(ent).unwrap();
+
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].ty, 2);
+        assert_eq!(world.entities[0].idx, 0);
+
+        assert_eq!(world.archetypes.len(), 3);
+        assert_eq!(world.archetypes[0].len(), 0);
+        assert_eq!(world.archetypes[1].len(), 0);
+        assert_eq!(world.archetypes[2].len(), 1);
+
+        assert_eq!(world.insert_map.len(), 2);
+        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, u64)>())], 1);
+        assert_eq!(world.insert_map[&(2, TypeId::of::<(i32,)>())], 1);
+
+        assert_eq!(world.remove_map.len(), 2);
+        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32, u64)>())], 0);
+        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 2);
+    }
+
+    #[test]
+    fn insert_then_get() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, (23,));
+
+        let comp = world.get::<i32>(ent).unwrap();
+        assert_eq!(*comp, 23);
+    }
+
+    #[test]
+    fn get_mut_then_get() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, (23,));
+
+        {
+            let mut comp = world.get_mut::<i32>(ent).unwrap();
+            *comp = 42;
+        }
+
+        let comp = world.get::<i32>(ent).unwrap();
+        assert_eq!(*comp, 42);
+    }
+
+    #[test]
+    fn borrows_can_be_shared() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, ((),));
+
+        let _comp = world.get::<()>(ent).unwrap();
+        let _comp = world.get::<()>(ent).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn mutable_borrows_are_exclusive() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, ((),));
+
+        let _comp = world.get_mut::<()>(ent);
+        let _comp = world.get_mut::<()>(ent).unwrap();
+    }
+
+    #[test]
+    fn entity_id_are_consistent() {
+        let mut world = World::new();
+
+        let ent1 = world.alloc();
+        let ent2 = world.alloc();
+        world.free(ent1);
+        let ent3 = world.alloc();
+
+        assert_eq!(*world.get::<Entity>(ent2).unwrap(), ent2);
+        assert_eq!(*world.get::<Entity>(ent3).unwrap(), ent3);
+    }
+
+    #[test]
+    #[should_panic]
+    fn entity_id_cannot_be_modified() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        let _ = world.get_mut::<Entity>(ent);
+    }
 }

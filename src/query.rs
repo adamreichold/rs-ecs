@@ -176,6 +176,7 @@ where
 }
 
 pub trait QuerySpec {
+    #[doc(hidden)]
     type Fetch: for<'a> Fetch<'a>;
 }
 
@@ -249,7 +250,9 @@ where
     type Item = &'q mut C;
 
     fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        assert_ne!(TypeId::of::<C>(), TypeId::of::<Entity>());
+        if TypeId::of::<C>() == TypeId::of::<Entity>() {
+            panic!("Entity cannot be queried mutably");
+        }
 
         archetype.find::<C>()
     }
@@ -450,61 +453,144 @@ macro_rules! impl_fetch_for_tuples {
 
 impl_fetch_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 
-#[test]
-fn it_works() {
-    let mut world = World::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let _1st = world.alloc();
-    world.insert(_1st, (23_i32, 42_u64));
+    fn spawn_three(world: &mut World) {
+        let ent = world.alloc();
+        world.insert(ent, (23_i32, 42_u64));
 
-    let _2nd = world.alloc();
-    world.insert(_2nd, (1_i32,));
+        let ent = world.alloc();
+        world.insert(ent, (1_i32, 2_i8, 3_u16));
 
-    let _3rd = world.alloc();
-    world.insert(_3rd, (42_i32, 23_u64, true));
-
-    let mut query = Query::<(&Entity, &mut i32)>::new();
-    let mut entities = Vec::new();
-
-    for (ent, val) in query.iter(&world) {
-        *val *= -1;
-
-        entities.push(*ent);
+        let ent = world.alloc();
+        world.insert(ent, (42_i32, 23_u64, true));
     }
 
-    {
-        let val = world.get::<i32>(_1st).unwrap();
-        assert_eq!(*val, -23);
+    #[test]
+    fn queries_can_be_used_once() {
+        let mut world = World::new();
 
-        let val = world.get::<i32>(_2nd).unwrap();
-        assert_eq!(*val, -1);
+        spawn_three(&mut world);
 
-        let val = world.get::<i32>(_3rd).unwrap();
-        assert_eq!(*val, -42);
+        let mut query = Query::<&i32>::new();
 
-        entities.sort_unstable();
-        assert_eq!(entities, vec![_1st, _2nd, _3rd]);
+        let comps = query.iter(&world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps, &[42, 1, 23]);
     }
 
-    let mut query = Query::<(Option<&bool>,)>::new();
-    let mut some = 0;
-    let mut none = 0;
+    #[test]
+    fn queries_can_be_reused() {
+        let mut world = World::new();
 
-    for (val,) in query.iter(&world) {
-        if let Some(val) = val {
-            assert!(val);
+        spawn_three(&mut world);
 
-            some += 1;
-        } else {
-            none += 1;
+        let mut query = Query::<&i32>::new();
+
+        let comps1 = query.iter(&world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps1, &[42, 1, 23]);
+
+        let comps2 = query.iter(&world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps2, &comps1);
+    }
+
+    #[test]
+    fn queries_can_be_reused_after_adding_an_archetype() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&i32>::new();
+
+        let comps1 = query.iter(&world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps1, &[42, 1, 23]);
+
+        let ent = world.alloc();
+        world.insert(ent, (0_i64,));
+
+        let comps2 = query.iter(&world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps2, &comps1);
+    }
+
+    #[test]
+    fn queries_can_modify_components() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        {
+            let mut query = Query::<&mut i32>::new();
+
+            for comp in query.iter(&world) {
+                *comp *= -1;
+            }
         }
+
+        let mut query = Query::<&i32>::new();
+        let comps = query.iter(&world).copied().collect::<Vec<_>>();
+
+        assert_eq!(&comps, &[-42, -1, -23]);
     }
 
-    assert_eq!(some, 1);
-    assert_eq!(none, 2);
+    #[test]
+    fn entities_can_be_queried_immutably() {
+        let mut world = World::new();
 
-    let mut query = Query::<&i32>::new().without::<bool>();
-    let sum = query.iter(&world).sum::<i32>();
+        spawn_three(&mut world);
 
-    assert_eq!(sum, -23 - 1);
+        let mut query = Query::<&Entity>::new();
+        let cnt = query.iter(&world).count();
+
+        assert_eq!(cnt, 3);
+    }
+
+    #[test]
+    #[should_panic]
+    fn entities_cannot_be_queried_mutably() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&mut Entity>::new();
+        let _ = query.iter(&world);
+    }
+
+    #[test]
+    fn try_exposes_optional_components() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<Option<&u64>>::new();
+        let cnt = query.iter(&world).count();
+        let cnt_some = query.iter(&world).flatten().count();
+
+        assert_eq!(cnt, 3);
+        assert_eq!(cnt_some, 2);
+    }
+
+    #[test]
+    fn with_checks_for_presence() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&i32>::new().with::<bool>();
+        let sum = query.iter(&world).sum::<i32>();
+
+        assert_eq!(sum, 42);
+    }
+
+    #[test]
+    fn with_checks_for_absence() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&i32>::new().without::<bool>();
+        let sum = query.iter(&world).sum::<i32>();
+
+        assert_eq!(sum, 23 + 1);
+    }
 }

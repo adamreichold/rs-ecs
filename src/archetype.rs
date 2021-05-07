@@ -202,25 +202,26 @@ impl Archetype {
         debug_assert!(src_idx < src.len);
         debug_assert!(dst_idx < dst.len);
 
+        let mut dst_types = &*dst.types;
+
+        let src_ptr = src.ptr.get_mut().as_ptr();
+        let dst_ptr = dst.ptr.get_mut().as_ptr();
+
         for src_ty in &*src.types {
-            let dst_ty = match dst.types.binary_search_by_key(&src_ty.id, |ty| ty.id) {
-                Ok(dst_ty) => &dst.types[dst_ty],
-                Err(_) => continue,
+            let dst_ty = match dst_types.iter().position(|ty| ty.id == src_ty.id) {
+                Some(dst_ty) => {
+                    dst_types = &dst_types[dst_ty..];
+                    &dst_types[0]
+                }
+                None => continue,
             };
 
-            let src_ptr = src
-                .ptr
-                .get_mut()
-                .as_ptr()
-                .add(src_ty.offset + src_ty.layout.size() * src_idx as usize);
+            let size = src_ty.layout.size();
 
-            let dst_ptr = dst
-                .ptr
-                .get_mut()
-                .as_ptr()
-                .add(dst_ty.offset + dst_ty.layout.size() * dst_idx as usize);
+            let src_ptr = src_ptr.add(src_ty.offset + size * src_idx as usize);
+            let dst_ptr = dst_ptr.add(dst_ty.offset + size * dst_idx as usize);
 
-            copy_nonoverlapping(src_ptr, dst_ptr, src_ty.layout.size());
+            copy_nonoverlapping(src_ptr, dst_ptr, size);
         }
     }
 }

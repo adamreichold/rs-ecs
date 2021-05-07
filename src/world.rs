@@ -226,7 +226,7 @@ impl World {
         C: 'static,
     {
         if TypeId::of::<C>() == TypeId::of::<Entity>() {
-            panic!("Entity cannot be queried mutably");
+            panic!("Entity cannot be accessed mutably");
         }
 
         let meta = &self.entities[ent.id as usize];

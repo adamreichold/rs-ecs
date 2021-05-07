@@ -14,14 +14,19 @@ pub struct Archetype {
 }
 
 impl Archetype {
-    pub fn new(types: Vec<TypeMetadata>) -> Self {
-        let max_align = types.iter().map(|ty| ty.layout.align()).max().unwrap_or(1);
+    pub fn new(types: TypeMetadataSet) -> Self {
+        let max_align = types
+            .0
+            .iter()
+            .map(|ty| ty.layout.align())
+            .max()
+            .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
         let ptr = NonNull::new(max_align as *mut u8).unwrap();
 
         Self {
-            types: types.into(),
+            types: types.0.into(),
             layout,
             len: 0,
             cap: 0,
@@ -141,13 +146,13 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub fn types(&self) -> Vec<TypeMetadata> {
-        self.types.to_vec()
+    pub fn types(&self) -> TypeMetadataSet {
+        TypeMetadataSet(self.types.to_vec())
     }
 
-    pub fn match_(&self, types: &[TypeMetadata]) -> bool {
+    pub fn match_(&self, types: &TypeMetadataSet) -> bool {
         let lhs = self.types.iter().map(|ty| ty.id);
-        let rhs = types.iter().map(|ty| ty.id);
+        let rhs = types.0.iter().map(|ty| ty.id);
 
         lhs.eq(rhs)
     }
@@ -332,7 +337,7 @@ impl<C> DerefMut for CompMut<'_, C> {
     }
 }
 
-pub struct TypeMetadata {
+struct TypeMetadata {
     id: TypeId,
     layout: Layout,
     drop: unsafe fn(*mut u8),
@@ -353,7 +358,7 @@ impl Clone for TypeMetadata {
 }
 
 impl TypeMetadata {
-    pub fn new<C>() -> Self
+    fn new<C>() -> Self
     where
         C: 'static,
     {
@@ -369,28 +374,35 @@ impl TypeMetadata {
             borrow: Default::default(),
         }
     }
+}
 
-    pub fn insert<C>(types: &mut Vec<Self>)
+#[derive(Default)]
+pub struct TypeMetadataSet(Vec<TypeMetadata>);
+
+impl TypeMetadataSet {
+    pub fn insert<C>(&mut self)
     where
         C: 'static,
     {
-        let ty = types.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id);
+        let ty = self.0.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id);
 
         match ty {
-            Err(ty) => types.insert(ty, TypeMetadata::new::<C>()),
+            Err(ty) => self.0.insert(ty, TypeMetadata::new::<C>()),
             Ok(_) => panic!("Component {} already present", type_name::<C>()),
         }
     }
 
-    pub fn remove<C>(types: &mut Vec<Self>) -> Option<()>
+    #[must_use]
+    pub fn remove<C>(&mut self) -> Option<()>
     where
         C: 'static,
     {
-        let ty = types
+        let ty = self
+            .0
             .binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id)
             .ok()?;
 
-        types.remove(ty);
+        self.0.remove(ty);
 
         Some(())
     }

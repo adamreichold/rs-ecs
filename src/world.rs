@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::archetype::{Archetype, Comp, CompMut, TypeMetadata};
+use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
 
 pub struct World {
     tag: u32,
@@ -23,13 +23,14 @@ impl Default for World {
 
 impl World {
     pub fn new() -> Self {
-        let empty_archetype = Archetype::new(vec![TypeMetadata::new::<Entity>()]);
+        let mut empty_archetype = TypeMetadataSet::default();
+        empty_archetype.insert::<Entity>();
 
         Self {
             tag: tag(),
             entities: Default::default(),
             free_list: Default::default(),
-            archetypes: vec![empty_archetype],
+            archetypes: vec![Archetype::new(empty_archetype)],
             insert_map: Default::default(),
             remove_map: Default::default(),
         }
@@ -116,20 +117,7 @@ impl World {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::insert(&mut types);
 
-            let pos = self
-                .archetypes
-                .iter_mut()
-                .position(|archetype| archetype.match_(&types));
-
-            if let Some(pos) = pos {
-                new_ty = pos as u32;
-            } else {
-                let len = self.archetypes.len();
-                assert!(len < u32::MAX as usize);
-                new_ty = len as u32;
-
-                self.archetypes.push(Archetype::new(types));
-            }
+            new_ty = self.get_or_insert(types);
 
             self.insert_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
             self.remove_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
@@ -157,20 +145,7 @@ impl World {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::remove(&mut types)?;
 
-            let pos = self
-                .archetypes
-                .iter_mut()
-                .position(|archetype| archetype.match_(&types));
-
-            if let Some(pos) = pos {
-                new_ty = pos as u32;
-            } else {
-                let len = self.archetypes.len();
-                assert!(len < u32::MAX as usize);
-                new_ty = len as u32;
-
-                self.archetypes.push(Archetype::new(types));
-            }
+            new_ty = self.get_or_insert(types);
 
             self.remove_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
             self.insert_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
@@ -182,6 +157,24 @@ impl World {
             self.move_(ent.id, meta.ty, new_ty, meta.idx);
 
             Some(comps)
+        }
+    }
+
+    fn get_or_insert(&mut self, types: TypeMetadataSet) -> u32 {
+        let pos = self
+            .archetypes
+            .iter_mut()
+            .position(|archetype| archetype.match_(&types));
+
+        if let Some(pos) = pos {
+            pos as u32
+        } else {
+            let len = self.archetypes.len();
+            assert!(len < u32::MAX as usize);
+
+            self.archetypes.push(Archetype::new(types));
+
+            len as u32
         }
     }
 
@@ -255,8 +248,9 @@ struct EntityMetadata {
 }
 
 pub unsafe trait Bundle: 'static {
-    fn insert(types: &mut Vec<TypeMetadata>);
-    fn remove(types: &mut Vec<TypeMetadata>) -> Option<()>;
+    fn insert(types: &mut TypeMetadataSet);
+    #[must_use]
+    fn remove(types: &mut TypeMetadataSet) -> Option<()>;
     unsafe fn write(self, archetype: &mut Archetype, idx: u32);
     unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self;
 }
@@ -274,12 +268,12 @@ macro_rules! impl_bundle_for_tuples {
         where
             $($types: 'static,)+
         {
-            fn insert(types: &mut Vec<TypeMetadata>) {
-                $(TypeMetadata::insert::<$types>(types);)+
+            fn insert(types: &mut TypeMetadataSet) {
+                $(types.insert::<$types>();)+
             }
 
-            fn remove(types: &mut Vec<TypeMetadata>) -> Option<()> {
-                $(TypeMetadata::remove::<$types>(types)?;)+
+            fn remove(types: &mut TypeMetadataSet) -> Option<()> {
+                $(types.remove::<$types>()?;)+
 
                 Some(())
             }

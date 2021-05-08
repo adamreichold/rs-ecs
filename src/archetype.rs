@@ -168,7 +168,7 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub unsafe fn read<C>(&mut self, idx: u32) -> C
+    pub unsafe fn access<C>(&mut self, idx: u32) -> *mut C
     where
         C: 'static,
     {
@@ -180,22 +180,7 @@ impl Archetype {
         let ptr = self.ptr.get_mut().as_ptr();
         let ptr = ptr.add(ty.offset + ty.layout.size() * idx as usize);
 
-        ptr.cast::<C>().read()
-    }
-
-    pub unsafe fn write<C>(&mut self, idx: u32, comp: C)
-    where
-        C: 'static,
-    {
-        debug_assert!(idx < self.len);
-
-        let ty = self.find::<C>().unwrap();
-        let ty = &self.types[ty];
-
-        let ptr = self.ptr.get_mut().as_ptr();
-        let ptr = ptr.add(ty.offset + ty.layout.size() * idx as usize);
-
-        ptr.cast::<C>().write(comp);
+        ptr.cast::<C>()
     }
 
     pub unsafe fn move_(src: &mut Self, dst: &mut Self, src_idx: u32, dst_idx: u32) {

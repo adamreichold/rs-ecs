@@ -47,6 +47,15 @@ impl Resources {
             &mut *(ref_.deref_mut() as *mut dyn Any as *mut R)
         }))
     }
+
+    pub fn mut_get_mut<R>(&mut self) -> &mut R
+    where
+        R: 'static,
+    {
+        let res = self.0.get_mut(&TypeId::of::<R>()).unwrap().get_mut();
+
+        unsafe { &mut *(res.deref_mut() as *mut dyn Any as *mut R) }
+    }
 }
 
 pub struct Res<'a, R>(Ref<'a, R>);
@@ -114,6 +123,21 @@ mod tests {
 
         {
             let mut res = resources.get_mut::<u64>();
+            *res = 23;
+        }
+
+        let res = resources.get::<u64>();
+        assert_eq!(*res, 23);
+    }
+
+    #[test]
+    fn mut_get_mut_then_get() {
+        let mut resources = Resources::new();
+
+        resources.insert(42_u64);
+
+        {
+            let res = resources.mut_get_mut::<u64>();
             *res = 23;
         }
 

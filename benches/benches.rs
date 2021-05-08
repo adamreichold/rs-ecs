@@ -135,6 +135,30 @@ fn get_component(bencher: &mut Bencher) {
 }
 
 #[bench]
+fn get_component_mutably(bencher: &mut Bencher) {
+    let mut world = World::new();
+
+    spawn_few(&mut world);
+
+    let entities = Query::<&Entity>::new()
+        .iter(&world)
+        .copied()
+        .collect::<Vec<_>>();
+
+    let mut entities = entities.iter().cycle();
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let entities = black_box(&mut entities);
+
+        let ent = *entities.next().unwrap();
+
+        let _pos = world.mut_get_mut::<Pos>(ent).unwrap();
+        let _vel = world.mut_get_mut::<Vel>(ent);
+    });
+}
+
+#[bench]
 fn query_single_archetype(bencher: &mut Bencher) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
@@ -207,5 +231,18 @@ fn get_resource(bencher: &mut Bencher) {
     bencher.iter(|| {
         let _i32 = resources.get_mut::<i32>();
         let _f64 = resources.get::<f64>();
+    });
+}
+
+#[bench]
+fn get_resource_mutably(bencher: &mut Bencher) {
+    let mut resources = Resources::new();
+
+    resources.insert(23);
+    resources.insert(42.0);
+
+    bencher.iter(|| {
+        let _i32 = resources.mut_get_mut::<i32>();
+        let _f64 = resources.mut_get_mut::<f64>();
     });
 }

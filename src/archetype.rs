@@ -267,6 +267,17 @@ impl Archetype {
 
         (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
     }
+
+    pub unsafe fn pointer<C>(&self, ty: usize) -> *mut C
+    where
+        C: 'static,
+    {
+        debug_assert!(ty < self.types.len());
+        let ty = self.types.get_unchecked(ty);
+        debug_assert_eq!(ty.id, TypeId::of::<C>());
+
+        (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
+    }
 }
 
 impl Archetype {
@@ -298,6 +309,20 @@ impl Archetype {
         let val = &mut *ptr.add(idx as usize);
 
         Some(CompMut { _ref, val })
+    }
+
+    pub unsafe fn mut_get_mut<C>(&mut self, idx: u32) -> Option<&mut C>
+    where
+        C: 'static,
+    {
+        debug_assert!(idx < self.len);
+
+        let ty = self.find::<C>()?;
+        let ptr = self.pointer::<C>(ty);
+
+        let val = &mut *ptr.add(idx as usize);
+
+        Some(val)
     }
 }
 

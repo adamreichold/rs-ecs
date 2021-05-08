@@ -234,6 +234,20 @@ impl World {
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
     }
+
+    pub fn mut_get_mut<C>(&mut self, ent: Entity) -> Option<&mut C>
+    where
+        C: 'static,
+    {
+        if TypeId::of::<C>() == TypeId::of::<Entity>() {
+            panic!("Entity cannot be accessed mutably");
+        }
+
+        let meta = &self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen);
+
+        unsafe { self.archetypes[meta.ty as usize].mut_get_mut::<C>(meta.idx) }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -510,6 +524,22 @@ mod tests {
 
         {
             let mut comp = world.get_mut::<i32>(ent).unwrap();
+            *comp = 42;
+        }
+
+        let comp = world.get::<i32>(ent).unwrap();
+        assert_eq!(*comp, 42);
+    }
+
+    #[test]
+    fn mut_get_mut_then_get() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, (23,));
+
+        {
+            let comp = world.mut_get_mut::<i32>(ent).unwrap();
             *comp = 42;
         }
 

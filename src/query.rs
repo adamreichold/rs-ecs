@@ -86,6 +86,28 @@ where
         f(iter)
     }
 
+    pub fn iter_mut<'q>(&'q mut self, world: &'q mut World) -> QueryIter<'q, S> {
+        let tag_gen = world.tag_gen();
+        let archetypes = world.archetypes();
+
+        if self.tag_gen != tag_gen {
+            self.tag_gen = tag_gen;
+
+            self.find(archetypes);
+        }
+
+        let types: &'q Vec<(usize, <S::Fetch as Fetch<'q>>::Ty)> =
+            unsafe { transmute(&self.types) };
+
+        QueryIter {
+            types: types.iter(),
+            archetypes,
+            idx: 0,
+            len: 0,
+            ptr: S::Fetch::dangling(),
+        }
+    }
+
     #[cold]
     fn find(&mut self, archetypes: &[Archetype]) {
         self.types.clear();
@@ -526,6 +548,18 @@ mod tests {
 
         let comps2 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
         assert_eq!(&comps2, &comps1);
+    }
+
+    #[test]
+    fn queries_can_be_used_without_borrowing() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&i32>::new();
+
+        let comps = query.iter_mut(&mut world).copied().collect::<Vec<_>>();
+        assert_eq!(&comps, &[23, 1, 42]);
     }
 
     #[test]

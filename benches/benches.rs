@@ -141,7 +141,7 @@ fn get_component_mutably(bencher: &mut Bencher) {
     spawn_few(&mut world);
 
     let entities = Query::<&Entity>::new()
-        .iter(&world)
+        .iter_mut(&mut world)
         .copied()
         .collect::<Vec<_>>();
 
@@ -180,6 +180,25 @@ fn query_single_archetype(bencher: &mut Bencher) {
 }
 
 #[bench]
+fn query_single_archetype_mutably(bencher: &mut Bencher) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn_few(&mut world);
+
+    let _ = query.iter_mut(&mut world);
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let query = black_box(&mut query);
+
+        for (pos, vel) in query.iter_mut(world) {
+            pos.0 += vel.0;
+        }
+    });
+}
+
+#[bench]
 fn query_many_archetypes(bencher: &mut Bencher) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
@@ -201,6 +220,25 @@ fn query_many_archetypes(bencher: &mut Bencher) {
 }
 
 #[bench]
+fn query_many_archetypes_mutably(bencher: &mut Bencher) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn_few_in_many_archetypes(&mut world);
+
+    let _ = query.iter_mut(&mut world);
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let query = black_box(&mut query);
+
+        for (pos, vel) in query.iter_mut(world) {
+            pos.0 += vel.0;
+        }
+    });
+}
+
+#[bench]
 fn query_very_many_small_archetypes(bencher: &mut Bencher) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
@@ -218,6 +256,25 @@ fn query_very_many_small_archetypes(bencher: &mut Bencher) {
                 pos.0 += vel.0;
             }
         });
+    });
+}
+
+#[bench]
+fn query_very_many_small_archetypes_mutably(bencher: &mut Bencher) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn_few_in_very_many_small_archetypes(&mut world);
+
+    let _ = query.iter_mut(&mut world);
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let query = black_box(&mut query);
+
+        for (pos, vel) in query.iter_mut(world) {
+            pos.0 += vel.0;
+        }
     });
 }
 

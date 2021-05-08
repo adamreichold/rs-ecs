@@ -267,17 +267,6 @@ impl Archetype {
 
         (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
     }
-
-    pub unsafe fn pointer<C>(&self, ty: usize) -> *mut C
-    where
-        C: 'static,
-    {
-        debug_assert!(ty < self.types.len());
-        let ty = self.types.get_unchecked(ty);
-        debug_assert_eq!(ty.id, TypeId::of::<C>());
-
-        (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
-    }
 }
 
 impl Archetype {

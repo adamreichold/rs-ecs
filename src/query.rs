@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn with_checks_for_absence() {
+    fn without_checks_for_absence() {
         let mut world = World::new();
 
         spawn_three(&mut world);

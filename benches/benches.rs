@@ -22,6 +22,56 @@ fn spawn_few(world: &mut World) {
     }
 }
 
+fn spawn_few_in_many_archetypes(world: &mut World) {
+    for _ in 0..1024 / 2 / 8 {
+        spawn_two::<0>(world);
+        spawn_two::<1>(world);
+        spawn_two::<2>(world);
+        spawn_two::<3>(world);
+        spawn_two::<4>(world);
+        spawn_two::<5>(world);
+        spawn_two::<6>(world);
+        spawn_two::<7>(world);
+    }
+}
+
+fn spawn_few_in_very_many_small_archetypes(world: &mut World) {
+    for _ in 0..128 / 2 / 32 {
+        spawn_two::<0>(world);
+        spawn_two::<1>(world);
+        spawn_two::<2>(world);
+        spawn_two::<3>(world);
+        spawn_two::<4>(world);
+        spawn_two::<5>(world);
+        spawn_two::<6>(world);
+        spawn_two::<7>(world);
+        spawn_two::<8>(world);
+        spawn_two::<9>(world);
+        spawn_two::<10>(world);
+        spawn_two::<11>(world);
+        spawn_two::<12>(world);
+        spawn_two::<13>(world);
+        spawn_two::<14>(world);
+        spawn_two::<15>(world);
+        spawn_two::<16>(world);
+        spawn_two::<17>(world);
+        spawn_two::<18>(world);
+        spawn_two::<19>(world);
+        spawn_two::<20>(world);
+        spawn_two::<21>(world);
+        spawn_two::<22>(world);
+        spawn_two::<23>(world);
+        spawn_two::<24>(world);
+        spawn_two::<25>(world);
+        spawn_two::<26>(world);
+        spawn_two::<27>(world);
+        spawn_two::<28>(world);
+        spawn_two::<29>(world);
+        spawn_two::<30>(world);
+        spawn_two::<31>(world);
+    }
+}
+
 #[bench]
 fn alloc_free(bencher: &mut Bencher) {
     let mut world = World::new();
@@ -112,16 +162,26 @@ fn query_many_archetypes(bencher: &mut Bencher) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
 
-    for _ in 0..1024 / 2 / 8 {
-        spawn_two::<0>(&mut world);
-        spawn_two::<1>(&mut world);
-        spawn_two::<2>(&mut world);
-        spawn_two::<3>(&mut world);
-        spawn_two::<4>(&mut world);
-        spawn_two::<5>(&mut world);
-        spawn_two::<6>(&mut world);
-        spawn_two::<7>(&mut world);
-    }
+    spawn_few_in_many_archetypes(&mut world);
+
+    let _ = query.iter(&world);
+
+    bencher.iter(|| {
+        let world = black_box(&world);
+        let query = black_box(&mut query);
+
+        for (pos, vel) in query.iter(world) {
+            pos.0 += vel.0;
+        }
+    });
+}
+
+#[bench]
+fn query_very_many_small_archetypes(bencher: &mut Bencher) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn_few_in_very_many_small_archetypes(&mut world);
 
     let _ = query.iter(&world);
 

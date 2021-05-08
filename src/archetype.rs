@@ -218,6 +218,7 @@ impl Archetype {
     {
         debug_assert!(ty < self.types.len());
         let ty = self.types.get_unchecked(ty);
+        debug_assert_eq!(ty.id, TypeId::of::<C>());
 
         let ref_ = ty.borrow.borrow();
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
@@ -231,6 +232,7 @@ impl Archetype {
     {
         debug_assert!(ty < self.types.len());
         let ty = self.types.get_unchecked(ty);
+        debug_assert_eq!(ty.id, TypeId::of::<C>());
 
         let ref_ = ty.borrow.borrow_mut();
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();

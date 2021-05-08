@@ -14,7 +14,7 @@ where
     S: QuerySpec,
 {
     tag_gen: (u32, u32),
-    types: Vec<(*const Archetype, <S::Fetch as Fetch<'static>>::Ty)>,
+    types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<<S::Fetch as Fetch<'static>>::Ref>,
     vals: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
 }
@@ -52,13 +52,15 @@ where
 
     pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
         let tag_gen = world.tag_gen();
+        let archetypes = world.archetypes();
+
         if self.tag_gen != tag_gen {
             self.tag_gen = tag_gen;
 
-            self.find(world);
+            self.find(archetypes);
         }
 
-        let types: &'q Vec<(*const Archetype, <S::Fetch as Fetch<'q>>::Ty)> =
+        let types: &'q Vec<(usize, <S::Fetch as Fetch<'q>>::Ty)> =
             unsafe { transmute(&self.types) };
 
         assert!(self.refs.is_empty());
@@ -68,8 +70,8 @@ where
         let vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
             unsafe { transmute(&mut self.vals) };
 
-        for (archetype, ty) in types {
-            let archetype = unsafe { &**archetype };
+        for (idx, ty) in types {
+            let archetype = &archetypes[*idx];
 
             let len = archetype.len();
             if len == 0 {
@@ -92,12 +94,12 @@ where
     }
 
     #[cold]
-    fn find(&mut self, world: &World) {
+    fn find(&mut self, archetypes: &[Archetype]) {
         self.types.clear();
 
-        for archetype in world.archetypes() {
+        for (idx, archetype) in archetypes.iter().enumerate() {
             if let Some(ty) = S::Fetch::find(archetype) {
-                self.types.push((archetype, ty));
+                self.types.push((idx, ty));
             }
         }
     }

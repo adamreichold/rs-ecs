@@ -145,6 +145,28 @@ impl Archetype {
     }
 }
 
+impl Drop for Archetype {
+    fn drop(&mut self) {
+        if self.layout.size() != 0 {
+            let ptr = self.ptr.get_mut().as_ptr();
+
+            unsafe {
+                for ty in &*self.types {
+                    let ptr = ptr.add(ty.offset);
+
+                    for idx in 0..self.len {
+                        let ptr = ptr.add(ty.layout.size() * idx as usize);
+
+                        (ty.drop)(ptr);
+                    }
+                }
+
+                dealloc(ptr, self.layout);
+            }
+        }
+    }
+}
+
 impl Archetype {
     pub fn types(&self) -> TypeMetadataSet {
         TypeMetadataSet(self.types.to_vec())
@@ -268,28 +290,6 @@ impl Archetype {
         let val = &mut *ptr.add(idx as usize);
 
         Some(CompMut { _ref, val })
-    }
-}
-
-impl Drop for Archetype {
-    fn drop(&mut self) {
-        if self.layout.size() != 0 {
-            let ptr = self.ptr.get_mut().as_ptr();
-
-            unsafe {
-                for ty in &*self.types {
-                    let ptr = ptr.add(ty.offset);
-
-                    for idx in 0..self.len {
-                        let ptr = ptr.add(ty.layout.size() * idx as usize);
-
-                        (ty.drop)(ptr);
-                    }
-                }
-
-                dealloc(ptr, self.layout);
-            }
-        }
     }
 }
 

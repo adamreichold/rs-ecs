@@ -275,7 +275,13 @@ macro_rules! impl_bundle_for_tuples {
             }
 
             fn remove(types: &mut TypeMetadataSet) -> Option<()> {
-                $(types.remove::<$types>()?;)+
+                $(
+                    if TypeId::of::<$types>() == TypeId::of::<Entity>() {
+                        panic!("Entity cannot be removed");
+                    }
+
+                    types.remove::<$types>()?;
+                )+
 
                 Some(())
             }
@@ -554,5 +560,14 @@ mod tests {
 
         let ent = world.alloc();
         let _ = world.get_mut::<Entity>(ent);
+    }
+
+    #[test]
+    #[should_panic]
+    fn entity_id_cannot_be_removed() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        let _ = world.remove::<(Entity,)>(ent);
     }
 }

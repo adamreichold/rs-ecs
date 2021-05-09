@@ -17,7 +17,6 @@ where
     tag_gen: (u32, u32),
     types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<<S::Fetch as Fetch<'static>>::Ref>,
-    vals: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
 }
 
 impl<S> Default for Query<S>
@@ -38,7 +37,6 @@ where
             tag_gen: Default::default(),
             types: Default::default(),
             refs: Default::default(),
-            vals: Default::default(),
         }
     }
 
@@ -69,26 +67,17 @@ where
         let refs =
             ClearOnDrop::<'q, <S::Fetch as Fetch<'q>>::Ref>(unsafe { transmute(&mut self.refs) });
 
-        self.vals.clear();
-        let vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
-            unsafe { transmute(&mut self.vals) };
-
         for (idx, ty) in types {
             let archetype = &archetypes[*idx];
 
-            let len = archetype.len();
-            if len == 0 {
-                continue;
+            if archetype.len() != 0 {
+                refs.0.push(unsafe { S::Fetch::borrow(archetype, *ty) });
             }
-
-            let (ref_, ptr) = unsafe { S::Fetch::borrow(archetype, *ty) };
-
-            refs.0.push(ref_);
-            vals.push((len, ptr));
         }
 
         let iter = QueryIter {
-            vals: vals.iter(),
+            types: types.iter(),
+            archetypes,
             idx: 0,
             len: 0,
             ptr: S::Fetch::dangling(),
@@ -127,7 +116,8 @@ pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
 {
-    vals: Iter<'q, (u32, <S::Fetch as Fetch<'q>>::Ptr)>,
+    types: Iter<'q, (usize, <S::Fetch as Fetch<'q>>::Ty)>,
+    archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
     ptr: <S::Fetch as Fetch<'q>>::Ptr,
@@ -140,16 +130,19 @@ where
     type Item = <S::Fetch as Fetch<'q>>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx == self.len {
-            let (len, ptr) = self.vals.next()?;
-            self.idx = 0;
-            self.len = *len;
-            self.ptr = *ptr;
+        loop {
+            if self.idx != self.len {
+                let val = unsafe { S::Fetch::deref(self.ptr, self.idx) };
+                self.idx += 1;
+                return Some(val);
+            } else {
+                let (idx, ty) = self.types.next()?;
+                let archetype = &self.archetypes[*idx];
+                self.idx = 0;
+                self.len = archetype.len();
+                self.ptr = unsafe { S::Fetch::pointer(archetype, *ty) };
+            }
         }
-
-        let val = unsafe { S::Fetch::get(self.ptr, self.idx) };
-        self.idx += 1;
-        Some(val)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -163,7 +156,13 @@ where
     S: QuerySpec,
 {
     fn len(&self) -> usize {
-        let len = self.vals.clone().map(|(len, _)| *len).sum::<u32>() + self.len - self.idx;
+        let len = self
+            .types
+            .clone()
+            .map(|(idx, _)| self.archetypes[*idx].len())
+            .sum::<u32>()
+            + self.len
+            - self.idx;
         len as usize
     }
 }
@@ -181,10 +180,11 @@ pub unsafe trait Fetch<'q> {
     type Item;
 
     fn find(archetype: &Archetype) -> Option<Self::Ty>;
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr);
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref;
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
 
     fn dangling() -> Self::Ptr;
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item;
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item;
 }
 
 impl<'a, C> QuerySpec for &'a C
@@ -210,15 +210,19 @@ where
         archetype.find::<C>()
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
         archetype.borrow::<C>(ty)
+    }
+
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        archetype.pointer::<C>(ty)
     }
 
     fn dangling() -> Self::Ptr {
         null()
     }
 
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
         &*ptr.add(idx as usize)
     }
 }
@@ -250,15 +254,19 @@ where
         archetype.find::<C>()
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
         archetype.borrow_mut::<C>(ty)
+    }
+
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        archetype.pointer::<C>(ty)
     }
 
     fn dangling() -> Self::Ptr {
         null_mut()
     }
 
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
         &mut *ptr.add(idx as usize)
     }
 }
@@ -286,19 +294,20 @@ where
         Some(F::find(archetype))
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
-        ty.map_or((None, None), |ty| {
-            let (ref_, ptr) = F::borrow(archetype, ty);
-            (Some(ref_), Some(ptr))
-        })
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
+        ty.map(|ty| F::borrow(archetype, ty))
+    }
+
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        ty.map(|ty| F::pointer(archetype, ty))
     }
 
     fn dangling() -> Self::Ptr {
         None
     }
 
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
-        ptr.map(|ptr| F::get(ptr, idx))
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
+        ptr.map(|ptr| F::deref(ptr, idx))
     }
 }
 
@@ -332,16 +341,20 @@ where
         }
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
         F::borrow(archetype, ty)
+    }
+
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        F::pointer(archetype, ty)
     }
 
     fn dangling() -> Self::Ptr {
         F::dangling()
     }
 
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
-        F::get(ptr, idx)
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
+        F::deref(ptr, idx)
     }
 }
 
@@ -375,16 +388,20 @@ where
         }
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
         F::borrow(archetype, ty)
+    }
+
+    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        F::pointer(archetype, ty)
     }
 
     fn dangling() -> Self::Ptr {
         F::dangling()
     }
 
-    unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
-        F::get(ptr, idx)
+    unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
+        F::deref(ptr, idx)
     }
 }
 
@@ -422,12 +439,17 @@ macro_rules! impl_fetch_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> (Self::Ref, Self::Ptr) {
+            unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
                 let ($($types,)+) = ty;
 
-                $(let $types = $types::borrow(archetype, $types);)+
+                ($($types::borrow(archetype, $types),)+)
+            }
 
-                (($($types.0,)+), ($($types.1,)+))
+            #[allow(non_snake_case)]
+            unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+                let ($($types,)+) = ty;
+
+                ($($types::pointer(archetype, $types),)+)
             }
 
             fn dangling() -> Self::Ptr {
@@ -435,10 +457,10 @@ macro_rules! impl_fetch_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            unsafe fn get(ptr: Self::Ptr, idx: u32) -> Self::Item {
+            unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
                 let ($($types,)+) = ptr;
 
-                ($($types::get($types, idx),)+)
+                ($($types::deref($types, idx),)+)
             }
         }
     };

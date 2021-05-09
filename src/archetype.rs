@@ -197,12 +197,9 @@ impl Archetype {
         debug_assert!(idx < self.len);
 
         let ty = self.find::<C>().unwrap();
-        let ty = &self.types[ty];
+        let ptr = self.pointer::<C>(ty);
 
-        let ptr = self.ptr.get_mut().as_ptr();
-        let ptr = ptr.add(ty.offset + ty.layout.size() * idx as usize);
-
-        ptr.cast::<C>()
+        ptr.add(idx as usize)
     }
 
     pub unsafe fn move_(src: &mut Self, dst: &mut Self, src_idx: u32, dst_idx: u32) {
@@ -234,7 +231,7 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub unsafe fn borrow<C>(&self, ty: usize) -> (Ref<'_, ()>, *const C)
+    pub unsafe fn borrow<C>(&self, ty: usize) -> Ref<'_, ()>
     where
         C: 'static,
     {
@@ -242,17 +239,12 @@ impl Archetype {
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        let ref_ = ty
-            .borrow
+        ty.borrow
             .try_borrow()
-            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()));
-
-        let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
-
-        (ref_, ptr)
+            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
-    pub unsafe fn borrow_mut<C>(&self, ty: usize) -> (RefMut<'_, ()>, *mut C)
+    pub unsafe fn borrow_mut<C>(&self, ty: usize) -> RefMut<'_, ()>
     where
         C: 'static,
     {
@@ -260,14 +252,20 @@ impl Archetype {
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        let ref_ = ty
-            .borrow
+        ty.borrow
             .try_borrow_mut()
-            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()));
+            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
+    }
 
-        let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
+    pub unsafe fn pointer<C>(&self, ty: usize) -> *mut C
+    where
+        C: 'static,
+    {
+        debug_assert!(ty < self.types.len());
+        let ty = self.types.get_unchecked(ty);
+        debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        (ref_, ptr)
+        (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
     }
 }
 
@@ -279,7 +277,8 @@ impl Archetype {
         debug_assert!(idx < self.len);
 
         let ty = self.find::<C>()?;
-        let (_ref, ptr) = self.borrow::<C>(ty);
+        let _ref = self.borrow::<C>(ty);
+        let ptr = self.pointer::<C>(ty);
 
         let val = &*ptr.add(idx as usize);
 
@@ -293,7 +292,8 @@ impl Archetype {
         debug_assert!(idx < self.len);
 
         let ty = self.find::<C>()?;
-        let (_ref, ptr) = self.borrow_mut::<C>(ty);
+        let _ref = self.borrow_mut::<C>(ty);
+        let ptr = self.pointer::<C>(ty);
 
         let val = &mut *ptr.add(idx as usize);
 

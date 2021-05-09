@@ -11,19 +11,21 @@ struct Vel(f32);
 fn spawn_two<const N: usize>(world: &mut World) {
     let ent = world.alloc();
     world.insert(ent, (Pos(0.), Vel(0.), [0; 1], [0; 2], [0; 3], [(); N]));
+    world.remove::<([i32; 1],)>(ent).unwrap();
 
     let ent = world.alloc();
     world.insert(ent, (Pos(0.), [0; 4], [0; 5], [(); N]));
+    world.remove::<([i32; 4],)>(ent).unwrap();
 }
 
 fn spawn_few(world: &mut World) {
-    for _ in 0..1024 / 2 {
+    for _ in 0..131072 / 2 {
         spawn_two::<0>(world);
     }
 }
 
 fn spawn_few_in_many_archetypes(world: &mut World) {
-    for _ in 0..1024 / 2 / 8 {
+    for _ in 0..131072 / 2 / 8 {
         spawn_two::<0>(world);
         spawn_two::<1>(world);
         spawn_two::<2>(world);
@@ -36,7 +38,7 @@ fn spawn_few_in_many_archetypes(world: &mut World) {
 }
 
 fn spawn_few_in_very_many_small_archetypes(world: &mut World) {
-    for _ in 0..128 / 2 / 32 {
+    for _ in 0..1024 / 2 / 32 {
         spawn_two::<0>(world);
         spawn_two::<1>(world);
         spawn_two::<2>(world);

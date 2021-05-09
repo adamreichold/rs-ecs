@@ -3,6 +3,7 @@ use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
 use std::mem::transmute;
 use std::ptr::{null, null_mut};
+use std::slice::Iter;
 
 use crate::{
     archetype::Archetype,
@@ -28,15 +29,6 @@ where
     }
 }
 
-impl<S> Drop for Query<S>
-where
-    S: QuerySpec,
-{
-    fn drop(&mut self) {
-        assert!(self.refs.is_empty());
-    }
-}
-
 impl<S> Query<S>
 where
     S: QuerySpec,
@@ -50,7 +42,10 @@ where
         }
     }
 
-    pub fn iter<'q>(&'q mut self, world: &'q World) -> QueryIter<'q, S> {
+    pub fn iter<'q, F, T>(&'q mut self, world: &'q World, f: F) -> T
+    where
+        F: FnOnce(QueryIter<'q, S>) -> T,
+    {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();
 
@@ -63,8 +58,16 @@ where
         let types: &'q Vec<(usize, <S::Fetch as Fetch<'q>>::Ty)> =
             unsafe { transmute(&self.types) };
 
-        assert!(self.refs.is_empty());
-        let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
+        struct ClearOnDrop<'a, T>(&'a mut Vec<T>);
+
+        impl<T> Drop for ClearOnDrop<'_, T> {
+            fn drop(&mut self) {
+                self.0.clear();
+            }
+        }
+
+        let refs =
+            ClearOnDrop::<'q, <S::Fetch as Fetch<'q>>::Ref>(unsafe { transmute(&mut self.refs) });
 
         self.vals.clear();
         let vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
@@ -80,17 +83,18 @@ where
 
             let (ref_, ptr) = unsafe { S::Fetch::borrow(archetype, *ty) };
 
-            refs.push(ref_);
+            refs.0.push(ref_);
             vals.push((len, ptr));
         }
 
-        QueryIter {
-            refs,
-            vals,
+        let iter = QueryIter {
+            vals: vals.iter(),
             idx: 0,
             len: 0,
             ptr: S::Fetch::dangling(),
-        }
+        };
+
+        f(iter)
     }
 
     #[cold]
@@ -123,20 +127,10 @@ pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
 {
-    refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref>,
-    vals: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)>,
+    vals: Iter<'q, (u32, <S::Fetch as Fetch<'q>>::Ptr)>,
     idx: u32,
     len: u32,
     ptr: <S::Fetch as Fetch<'q>>::Ptr,
-}
-
-impl<S> Drop for QueryIter<'_, S>
-where
-    S: QuerySpec,
-{
-    fn drop(&mut self) {
-        self.refs.clear();
-    }
 }
 
 impl<'q, S> Iterator for QueryIter<'q, S>
@@ -146,19 +140,16 @@ where
     type Item = <S::Fetch as Fetch<'q>>::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.idx != self.len {
-                let val = unsafe { S::Fetch::get(self.ptr, self.idx) };
-                self.idx += 1;
-                return Some(val);
-            } else {
-                let (len, ptr) = self.vals.pop()?;
-                self.idx = 0;
-                self.len = len;
-                self.ptr = ptr;
-                continue;
-            }
+        if self.idx == self.len {
+            let (len, ptr) = self.vals.next()?;
+            self.idx = 0;
+            self.len = *len;
+            self.ptr = *ptr;
         }
+
+        let val = unsafe { S::Fetch::get(self.ptr, self.idx) };
+        self.idx += 1;
+        Some(val)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -172,7 +163,7 @@ where
     S: QuerySpec,
 {
     fn len(&self) -> usize {
-        let len = self.vals.iter().map(|(len, _)| *len).sum::<u32>() + self.len - self.idx;
+        let len = self.vals.clone().map(|(len, _)| *len).sum::<u32>() + self.len - self.idx;
         len as usize
     }
 }
@@ -478,8 +469,8 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps = query.iter(&world).copied().collect::<Vec<_>>();
-        assert_eq!(&comps, &[42, 1, 23]);
+        let comps = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        assert_eq!(&comps, &[23, 1, 42]);
     }
 
     #[test]
@@ -490,10 +481,10 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps1 = query.iter(&world).copied().collect::<Vec<_>>();
-        assert_eq!(&comps1, &[42, 1, 23]);
+        let comps1 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        assert_eq!(&comps1, &[23, 1, 42]);
 
-        let comps2 = query.iter(&world).copied().collect::<Vec<_>>();
+        let comps2 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
         assert_eq!(&comps2, &comps1);
     }
 
@@ -505,13 +496,13 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps1 = query.iter(&world).copied().collect::<Vec<_>>();
-        assert_eq!(&comps1, &[42, 1, 23]);
+        let comps1 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        assert_eq!(&comps1, &[23, 1, 42]);
 
         let ent = world.alloc();
         world.insert(ent, (0_i64,));
 
-        let comps2 = query.iter(&world).copied().collect::<Vec<_>>();
+        let comps2 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
         assert_eq!(&comps2, &comps1);
     }
 
@@ -524,15 +515,17 @@ mod tests {
         {
             let mut query = Query::<&mut i32>::new();
 
-            for comp in query.iter(&world) {
-                *comp *= -1;
-            }
+            query.iter(&world, |iter| {
+                for comp in iter {
+                    *comp *= -1;
+                }
+            });
         }
 
         let mut query = Query::<&i32>::new();
-        let comps = query.iter(&world).copied().collect::<Vec<_>>();
+        let comps = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
 
-        assert_eq!(&comps, &[-42, -1, -23]);
+        assert_eq!(&comps, &[-23, -1, -42]);
     }
 
     #[test]
@@ -542,7 +535,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&Entity>::new();
-        let cnt = query.iter(&world).count();
+        let cnt = query.iter(&world, |iter| iter.count());
 
         assert_eq!(cnt, 3);
     }
@@ -555,7 +548,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&mut Entity>::new();
-        let _ = query.iter(&world);
+        let _ = query.iter(&world, |_iter| {});
     }
 
     #[test]
@@ -565,8 +558,8 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<Option<&u64>>::new();
-        let cnt = query.iter(&world).count();
-        let cnt_some = query.iter(&world).flatten().count();
+        let cnt = query.iter(&world, |iter| iter.count());
+        let cnt_some = query.iter(&world, |iter| iter.flatten().count());
 
         assert_eq!(cnt, 3);
         assert_eq!(cnt_some, 2);
@@ -579,7 +572,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&i32>::new().with::<bool>();
-        let sum = query.iter(&world).sum::<i32>();
+        let sum = query.iter(&world, |iter| iter.sum::<i32>());
 
         assert_eq!(sum, 42);
     }
@@ -591,7 +584,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&i32>::new().without::<bool>();
-        let sum = query.iter(&world).sum::<i32>();
+        let sum = query.iter(&world, |iter| iter.sum::<i32>());
 
         assert_eq!(sum, 23 + 1);
     }

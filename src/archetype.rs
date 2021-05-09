@@ -242,7 +242,11 @@ impl Archetype {
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        let ref_ = ty.borrow.borrow();
+        let ref_ = ty
+            .borrow
+            .try_borrow()
+            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()));
+
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)
@@ -256,7 +260,11 @@ impl Archetype {
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        let ref_ = ty.borrow.borrow_mut();
+        let ref_ = ty
+            .borrow
+            .try_borrow_mut()
+            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()));
+
         let ptr = (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>();
 
         (ref_, ptr)

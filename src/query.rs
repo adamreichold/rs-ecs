@@ -44,7 +44,7 @@ where
 
     pub fn iter<'q, F, T>(&'q mut self, world: &'q World, f: F) -> T
     where
-        F: FnOnce(QueryIter<'q, S>) -> T,
+        F: for<'i> FnOnce(QueryIter<'i, S>) -> T,
     {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();

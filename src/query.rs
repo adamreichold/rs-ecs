@@ -51,7 +51,6 @@ where
         }
 
         let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(&*self.types) };
-
         let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
 
         for (idx, ty) in types {
@@ -123,7 +122,7 @@ where
             archetypes: self.archetypes,
             idx: 0,
             len: 0,
-            ptr: S::Fetch::dangling(),
+            ptr: S::Fetch::null(),
         }
     }
 }
@@ -208,7 +207,7 @@ pub unsafe trait Fetch<'q> {
     unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref;
     unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
 
-    fn dangling() -> Self::Ptr;
+    fn null() -> Self::Ptr;
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item;
 }
 
@@ -243,7 +242,7 @@ where
         archetype.pointer::<C>(ty)
     }
 
-    fn dangling() -> Self::Ptr {
+    fn null() -> Self::Ptr {
         null()
     }
 
@@ -287,7 +286,7 @@ where
         archetype.pointer::<C>(ty)
     }
 
-    fn dangling() -> Self::Ptr {
+    fn null() -> Self::Ptr {
         null_mut()
     }
 
@@ -327,7 +326,7 @@ where
         ty.map(|ty| F::pointer(archetype, ty))
     }
 
-    fn dangling() -> Self::Ptr {
+    fn null() -> Self::Ptr {
         None
     }
 
@@ -374,8 +373,8 @@ where
         F::pointer(archetype, ty)
     }
 
-    fn dangling() -> Self::Ptr {
-        F::dangling()
+    fn null() -> Self::Ptr {
+        F::null()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
@@ -421,8 +420,8 @@ where
         F::pointer(archetype, ty)
     }
 
-    fn dangling() -> Self::Ptr {
-        F::dangling()
+    fn null() -> Self::Ptr {
+        F::null()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
@@ -477,8 +476,8 @@ macro_rules! impl_fetch_for_tuples {
                 ($($types::pointer(archetype, $types),)+)
             }
 
-            fn dangling() -> Self::Ptr {
-                ($($types::dangling(),)+)
+            fn null() -> Self::Ptr {
+                ($($types::null(),)+)
             }
 
             #[allow(non_snake_case)]

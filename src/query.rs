@@ -40,10 +40,7 @@ where
         }
     }
 
-    pub fn iter<'q, F, T>(&'q mut self, world: &'q World, f: F) -> T
-    where
-        F: for<'i> FnOnce(QueryIter<'i, S>) -> T,
-    {
+    pub fn borrow<'q>(&'q mut self, world: &'q World) -> QueryRef<'q, S> {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();
 
@@ -53,37 +50,24 @@ where
             self.find(archetypes);
         }
 
-        let types: &'q Vec<(usize, <S::Fetch as Fetch<'q>>::Ty)> =
-            unsafe { transmute(&self.types) };
+        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(&*self.types) };
 
-        struct ClearOnDrop<'a, T>(&'a mut Vec<T>);
-
-        impl<T> Drop for ClearOnDrop<'_, T> {
-            fn drop(&mut self) {
-                self.0.clear();
-            }
-        }
-
-        let refs =
-            ClearOnDrop::<'q, <S::Fetch as Fetch<'q>>::Ref>(unsafe { transmute(&mut self.refs) });
+        let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
 
         for (idx, ty) in types {
             let archetype = &archetypes[*idx];
 
             if archetype.len() != 0 {
-                refs.0.push(unsafe { S::Fetch::borrow(archetype, *ty) });
+                refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
             }
         }
 
-        let iter = QueryIter {
-            types: types.iter(),
+        QueryRef {
+            types,
             archetypes,
-            idx: 0,
-            len: 0,
-            ptr: S::Fetch::dangling(),
-        };
-
-        f(iter)
+            refs,
+            active: false,
+        }
     }
 
     #[cold]
@@ -109,6 +93,47 @@ where
         C: 'static,
     {
         Query::new()
+    }
+}
+
+pub struct QueryRef<'q, S>
+where
+    S: QuerySpec,
+{
+    types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)],
+    archetypes: &'q [Archetype],
+    refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref>,
+    active: bool,
+}
+
+impl<S> QueryRef<'_, S>
+where
+    S: QuerySpec,
+{
+    pub fn iter<'i>(&'i mut self) -> QueryIter<'i, S> {
+        if self.active {
+            panic!("Borrow already active");
+        }
+        self.active = true;
+
+        let types: &'i [(usize, <S::Fetch as Fetch<'i>>::Ty)] = unsafe { transmute(self.types) };
+
+        QueryIter {
+            types: types.iter(),
+            archetypes: self.archetypes,
+            idx: 0,
+            len: 0,
+            ptr: S::Fetch::dangling(),
+        }
+    }
+}
+
+impl<S> Drop for QueryRef<'_, S>
+where
+    S: QuerySpec,
+{
+    fn drop(&mut self) {
+        self.refs.clear();
     }
 }
 
@@ -491,7 +516,7 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps = query.borrow(&world).iter().copied().collect::<Vec<_>>();
         assert_eq!(&comps, &[23, 1, 42]);
     }
 
@@ -503,10 +528,10 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps1 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps1 = query.borrow(&world).iter().copied().collect::<Vec<_>>();
         assert_eq!(&comps1, &[23, 1, 42]);
 
-        let comps2 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps2 = query.borrow(&world).iter().copied().collect::<Vec<_>>();
         assert_eq!(&comps2, &comps1);
     }
 
@@ -518,13 +543,13 @@ mod tests {
 
         let mut query = Query::<&i32>::new();
 
-        let comps1 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps1 = query.borrow(&world).iter().copied().collect::<Vec<_>>();
         assert_eq!(&comps1, &[23, 1, 42]);
 
         let ent = world.alloc();
         world.insert(ent, (0_i64,));
 
-        let comps2 = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps2 = query.borrow(&world).iter().copied().collect::<Vec<_>>();
         assert_eq!(&comps2, &comps1);
     }
 
@@ -537,17 +562,29 @@ mod tests {
         {
             let mut query = Query::<&mut i32>::new();
 
-            query.iter(&world, |iter| {
-                for comp in iter {
-                    *comp *= -1;
-                }
-            });
+            for comp in query.borrow(&world).iter() {
+                *comp *= -1;
+            }
         }
 
         let mut query = Query::<&i32>::new();
-        let comps = query.iter(&world, |iter| iter.copied().collect::<Vec<_>>());
+        let comps = query.borrow(&world).iter().copied().collect::<Vec<_>>();
 
         assert_eq!(&comps, &[-23, -1, -42]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn borrows_can_only_be_activated_once() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&i32>::new();
+        let mut query = query.borrow(&world);
+
+        let _ = query.iter();
+        query.iter();
     }
 
     #[test]
@@ -557,7 +594,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&Entity>::new();
-        let cnt = query.iter(&world, |iter| iter.count());
+        let cnt = query.borrow(&world).iter().count();
 
         assert_eq!(cnt, 3);
     }
@@ -570,7 +607,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&mut Entity>::new();
-        let _ = query.iter(&world, |_iter| {});
+        let _ = query.borrow(&world).iter();
     }
 
     #[test]
@@ -580,8 +617,8 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<Option<&u64>>::new();
-        let cnt = query.iter(&world, |iter| iter.count());
-        let cnt_some = query.iter(&world, |iter| iter.flatten().count());
+        let cnt = query.borrow(&world).iter().count();
+        let cnt_some = query.borrow(&world).iter().flatten().count();
 
         assert_eq!(cnt, 3);
         assert_eq!(cnt_some, 2);
@@ -594,7 +631,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&i32>::new().with::<bool>();
-        let sum = query.iter(&world, |iter| iter.sum::<i32>());
+        let sum = query.borrow(&world).iter().sum::<i32>();
 
         assert_eq!(sum, 42);
     }
@@ -606,7 +643,7 @@ mod tests {
         spawn_three(&mut world);
 
         let mut query = Query::<&i32>::new().without::<bool>();
-        let sum = query.iter(&world, |iter| iter.sum::<i32>());
+        let sum = query.borrow(&world).iter().sum::<i32>();
 
         assert_eq!(sum, 23 + 1);
     }

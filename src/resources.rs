@@ -30,7 +30,12 @@ impl Resources {
     where
         R: 'static,
     {
-        let ref_ = self.0[&TypeId::of::<R>()].borrow();
+        let ref_ = self
+            .0
+            .get(&TypeId::of::<R>())
+            .unwrap_or_else(|| panic!("Resource {} not present", type_name::<R>()))
+            .try_borrow()
+            .unwrap_or_else(|_err| panic!("Resource {} already borrwed", type_name::<R>()));
 
         Res(Ref::map(ref_, |ref_| unsafe {
             &*(ref_.deref() as *const dyn Any as *const R)
@@ -41,7 +46,12 @@ impl Resources {
     where
         R: 'static,
     {
-        let ref_ = self.0[&TypeId::of::<R>()].borrow_mut();
+        let ref_ = self
+            .0
+            .get(&TypeId::of::<R>())
+            .unwrap_or_else(|| panic!("Resource {} not present", type_name::<R>()))
+            .try_borrow_mut()
+            .unwrap_or_else(|_err| panic!("Resource {} already borrwed", type_name::<R>()));
 
         ResMut(RefMut::map(ref_, |ref_| unsafe {
             &mut *(ref_.deref_mut() as *mut dyn Any as *mut R)

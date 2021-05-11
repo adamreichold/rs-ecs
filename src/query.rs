@@ -126,6 +126,8 @@ where
     /// Narrow down a query to entities that have a certain component,
     /// without borrowing that component.
     ///
+    /// For use with prepared queries, see [With].
+    ///
     /// # Examples
     ///
     /// ```
@@ -141,6 +143,8 @@ where
 
     /// Narrow down a query to entities that do not have a certain component.
     ///
+    /// For use with prepared queries, see [Without].
+    ///
     /// # Examples
     ///
     /// ```
@@ -155,7 +159,7 @@ where
     }
 }
 
-/// Borrow of a query. Required to obtain an iterator.
+/// Borrow of the [World] for a [Query]. Required to obtain an iterator.
 pub struct QueryRef<'q, S>
 where
     S: QuerySpec,
@@ -198,6 +202,7 @@ where
     }
 }
 
+/// Used to iterate through the entities which match a certain [Query].
 pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
@@ -253,6 +258,7 @@ where
     }
 }
 
+/// Type level specification of a query for a certain set of components.
 pub trait QuerySpec {
     #[doc(hidden)]
     type Fetch: for<'a> Fetch<'a>;
@@ -397,6 +403,15 @@ where
     }
 }
 
+/// A query specification to iterate over entities with a certain component,
+/// but without borrowing that component.
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// let query = Query::<With<(&u32, &bool), f32>>::new();
+/// ```
 pub struct With<S, C>(PhantomData<(S, C)>);
 
 impl<S, C> QuerySpec for With<S, C>
@@ -444,6 +459,14 @@ where
     }
 }
 
+/// A query specification to iterate over entities without a certain component.
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// let query = Query::<Without<(&u32, &bool), f32>>::new();
+/// ```
 pub struct Without<S, C>(PhantomData<(S, C)>);
 
 impl<S, C> QuerySpec for Without<S, C>

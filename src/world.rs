@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
 
+/// The ECS world storing [Entity] and components.
 pub struct World {
     tag: u32,
     entities: Vec<EntityMetadata>,
@@ -16,12 +17,14 @@ pub struct World {
 }
 
 impl Default for World {
+    /// Create an empty world. Synonym for [Self::new()].
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl World {
+    /// Create an empty world. Synonym for [Self::default()].
     pub fn new() -> Self {
         let mut empty_archetype = TypeMetadataSet::default();
         empty_archetype.insert::<Entity>();
@@ -47,6 +50,18 @@ fn tag() -> u32 {
 }
 
 impl World {
+    /// Create an [Entity] without any components.
+    /// To add components, see [Self::insert()].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    /// ```
     #[must_use]
     pub fn alloc(&mut self) -> Entity {
         let id = if let Some(id) = self.free_list.pop() {
@@ -71,6 +86,20 @@ impl World {
         ent
     }
 
+    /// Remove an [Entity] and all its components from the world.
+    /// To remove components, see [Self::remove()].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    ///
+    /// world.free(entity);
+    /// ```
     pub fn free(&mut self, mut ent: Entity) {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
@@ -102,6 +131,22 @@ impl World {
         &self.archetypes
     }
 
+    /// Insert components for a given [Entity].
+    ///
+    /// # Panics
+    ///
+    /// Panics if one of the components is already present for the entity.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    /// world.insert(entity, (String::from("Hello"),));
+    /// ```
     pub fn insert<B>(&mut self, ent: Entity, comps: B)
     where
         B: Bundle,
@@ -130,6 +175,20 @@ impl World {
         }
     }
 
+    /// Remove components for a given [Entity].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true, String::from("Hello")));
+    ///
+    /// world.remove::<(u32, bool)>(entity).unwrap();
+    /// world.remove::<(String,)>(entity).unwrap();
+    /// ```
     pub fn remove<B>(&mut self, ent: Entity) -> Option<B>
     where
         B: Bundle,
@@ -201,6 +260,19 @@ impl World {
 }
 
 impl World {
+    /// Check if a certain component type is present for an [Entity].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    ///
+    /// assert!(world.contains::<u32>(entity));
+    /// ```
     pub fn contains<C>(&self, ent: Entity) -> bool
     where
         C: 'static,
@@ -211,6 +283,19 @@ impl World {
         self.archetypes[meta.ty as usize].find::<C>().is_some()
     }
 
+    /// Get an immutable reference to the component of the given type for an [Entity].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    ///
+    /// let comp = world.get::<u32>(entity).unwrap();
+    /// ```
     pub fn get<C>(&self, ent: Entity) -> Option<Comp<'_, C>>
     where
         C: 'static,
@@ -221,6 +306,19 @@ impl World {
         unsafe { self.archetypes[meta.ty as usize].get::<C>(meta.idx) }
     }
 
+    /// Get a mutable reference to the component of the given type for an [Entity].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    ///
+    /// let comp = world.get_mut::<u32>(entity).unwrap();
+    /// ```
     pub fn get_mut<C>(&self, ent: Entity) -> Option<CompMut<'_, C>>
     where
         C: 'static,
@@ -236,6 +334,7 @@ impl World {
     }
 }
 
+/// An opaque entity identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entity {
     id: u32,

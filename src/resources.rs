@@ -4,16 +4,51 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::{Deref, DerefMut};
 
-#[derive(Default)]
+/// A type map for holding resources.
+///
+/// Resources replace global variables and my be accessed by systems that know their type.
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// struct MyResource(u32);
+///
+/// let mut resources = Resources::new();
+///
+/// // Insert multiple resources
+/// resources.insert(42_u32);
+/// resources.insert(MyResource(0));
+///
+/// // Borrow a resource immutably
+/// let my_res = resources.get::<MyResource>();
+///
+/// // Borrow a resource mutably
+/// let mut u32_res = resources.get_mut::<u32>();
+/// *u32_res += 1;
+/// ```
 pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>, BuildHasherDefault<TypeIdHasher>>);
 
-impl Resources {
-    pub fn new() -> Self {
-        Default::default()
+impl Default for Resources {
+    /// Create an empty resources map. Synonym for [Self::new()].
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Resources {
+    /// Create an empty resources map. Synonym for [Self::default()].
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl Resources {
+    /// Insert a resource.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a resource of the same type is already present.
     pub fn insert<R>(&mut self, res: R)
     where
         R: 'static,
@@ -26,6 +61,11 @@ impl Resources {
 }
 
 impl Resources {
+    /// Borrow a resource immutably
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resource is not present.
     pub fn get<R>(&self) -> Res<'_, R>
     where
         R: 'static,
@@ -42,6 +82,11 @@ impl Resources {
         }))
     }
 
+    /// Borrow a resource mutably
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resource is not present.
     pub fn get_mut<R>(&self) -> ResMut<'_, R>
     where
         R: 'static,
@@ -59,6 +104,7 @@ impl Resources {
     }
 }
 
+/// An immutable borrow of a resource.
 pub struct Res<'a, R>(Ref<'a, R>);
 
 impl<R> Deref for Res<'_, R> {
@@ -69,6 +115,7 @@ impl<R> Deref for Res<'_, R> {
     }
 }
 
+/// A mutable borrow of a resource.
 pub struct ResMut<'a, R>(RefMut<'a, R>);
 
 impl<R> Deref for ResMut<'_, R> {

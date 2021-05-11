@@ -10,6 +10,29 @@ use crate::{
     world::{Entity, World},
 };
 
+/// Query to get an iterator over all entities with a certain combination of components.
+///
+/// Queries are provided as stand-alone structs to allow for prepared queries that can be
+/// re-used, for optimzation. Hence, queries neet to borrow the [World] before they can be iterated
+/// (see [Query::borrow]).
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// let mut world = World::new();
+///
+/// let entity = world.alloc();
+/// world.insert(entity, (0_i32, true));
+///
+/// let entity = world.alloc();
+/// world.insert(entity, (42_i32, 23_u32, 1.0_f32));
+///
+/// let mut query = Query::<(&i32, &mut bool)>::new();
+/// for (i, b) in query.borrow(&world).iter() {
+///     *b = *i > 10;
+/// }
+/// ```
 pub struct Query<S>
 where
     S: QuerySpec,
@@ -32,6 +55,16 @@ impl<S> Query<S>
 where
     S: QuerySpec,
 {
+    /// Create a query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut immutable_query = Query::<(&i32,)>::new();
+    /// let mut mutable_query = Query::<(&i32, &mut bool)>::new();
+    /// let mut query_with_entity = Query::<(&Entity, &i32, &mut bool)>::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             tag_gen: Default::default(),
@@ -40,6 +73,20 @@ where
         }
     }
 
+    /// Borrow the [World] to allow for iterating the query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    /// let mut query = Query::<(&i32, &bool)>::new();
+    /// let mut borrow = query.borrow(&world);
+    ///
+    /// for (i, b) in borrow.iter() {
+    ///     println!("{}, {}", i, b);
+    /// }
+    /// ```
     pub fn borrow<'q>(&'q mut self, world: &'q World) -> QueryRef<'q, S> {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();
@@ -80,6 +127,17 @@ where
         }
     }
 
+    /// Narrow down a query to entities that have a certain component,
+    /// without borrowing that component.
+    ///
+    /// For use with prepared queries, see [With].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let query = Query::<(&i32,)>::new().with::<bool>();
+    /// ```
     pub fn with<C>(self) -> Query<With<S, C>>
     where
         C: 'static,
@@ -87,6 +145,16 @@ where
         Query::new()
     }
 
+    /// Narrow down a query to entities that do not have a certain component.
+    ///
+    /// For use with prepared queries, see [Without].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let query = Query::<(&i32,)>::new().without::<bool>();
+    /// ```
     pub fn without<C>(self) -> Query<Without<S, C>>
     where
         C: 'static,
@@ -95,6 +163,7 @@ where
     }
 }
 
+/// Borrow of the [World] for a [Query]. Required to obtain an iterator.
 pub struct QueryRef<'q, S>
 where
     S: QuerySpec,
@@ -109,6 +178,7 @@ impl<S> QueryRef<'_, S>
 where
     S: QuerySpec,
 {
+    /// Create an iterator over the entities matching the query.
     pub fn iter<'i>(&'i mut self) -> QueryIter<'i, S> {
         if self.active {
             panic!("Borrow already active");
@@ -136,6 +206,7 @@ where
     }
 }
 
+/// Used to iterate through the entities which match a certain [Query].
 pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
@@ -191,6 +262,7 @@ where
     }
 }
 
+/// Type level specification of a query for a certain set of components.
 pub trait QuerySpec {
     #[doc(hidden)]
     type Fetch: for<'a> Fetch<'a>;
@@ -335,6 +407,20 @@ where
     }
 }
 
+/// A query specification to iterate over entities with a certain component,
+/// but without borrowing that component.
+///
+/// See also [Query::with()]
+///
+/// # Examples
+///
+/// A query for components of type `u32` and `bool`,
+/// only matching entities with a component of type `f32`.
+///
+/// ```
+/// # use rs_ecs::*;
+/// let query = Query::<With<(&u32, &bool), f32>>::new();
+/// ```
 pub struct With<S, C>(PhantomData<(S, C)>);
 
 impl<S, C> QuerySpec for With<S, C>
@@ -382,6 +468,19 @@ where
     }
 }
 
+/// A query specification to iterate over entities without a certain component.
+///
+/// See also [Query::without()]
+///
+/// # Examples
+///
+/// A query for components of type `u32` and `bool`,
+/// only matching entities without a component of type `f32`.
+///
+/// ```
+/// # use rs_ecs::*;
+/// let query = Query::<Without<(&u32, &bool), f32>>::new();
+/// ```
 pub struct Without<S, C>(PhantomData<(S, C)>);
 
 impl<S, C> QuerySpec for Without<S, C>

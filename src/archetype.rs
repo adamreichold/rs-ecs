@@ -301,6 +301,7 @@ impl Archetype {
     }
 }
 
+/// An immutable borrow of a component.
 pub struct Comp<'a, C> {
     _ref: Ref<'a, ()>,
     val: &'a C,
@@ -314,6 +315,7 @@ impl<C> Deref for Comp<'_, C> {
     }
 }
 
+/// A mutable borrow of a component.
 pub struct CompMut<'a, C> {
     _ref: RefMut<'a, ()>,
     val: &'a mut C,

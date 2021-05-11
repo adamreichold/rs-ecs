@@ -10,6 +10,25 @@ use crate::{
     world::{Entity, World},
 };
 
+/// Query to get an iterator over all entities with a certain combination of components.
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// let mut world = World::new();
+///
+/// let entity = world.alloc();
+/// world.insert(entity, (0_i32, true));
+///
+/// let entity = world.alloc();
+/// world.insert(entity, (42_i32, 23_u32, 1.0_f32));
+///
+/// let mut query = Query::<(&i32, &mut bool)>::new();
+/// for (i, b) in query.borrow(&world).iter() {
+///     *b = *i > 10;
+/// }
+/// ```
 pub struct Query<S>
 where
     S: QuerySpec,
@@ -32,6 +51,16 @@ impl<S> Query<S>
 where
     S: QuerySpec,
 {
+    /// Create a query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut immutable_query = Query::<(&i32,)>::new();
+    /// let mut mutable_query = Query::<(&i32, &mut bool)>::new();
+    /// let mut query_with_entity = Query::<(&Entity, &i32, &mut bool)>::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             tag_gen: Default::default(),
@@ -40,6 +69,20 @@ where
         }
     }
 
+    /// Borrow the world to allow for iterating the query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    /// let mut query = Query::<(&i32, &bool)>::new();
+    /// let mut borrow = query.borrow(&world);
+    ///
+    /// for (i, b) in borrow.iter() {
+    ///     println!("{}, {}", i, b);
+    /// }
+    /// ```
     pub fn borrow<'q>(&'q mut self, world: &'q World) -> QueryRef<'q, S> {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();
@@ -80,6 +123,15 @@ where
         }
     }
 
+    /// Narrow down a query to entities that have a certain component,
+    /// without borrowing that component.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let query = Query::<(&i32,)>::new().with::<bool>();
+    /// ```
     pub fn with<C>(self) -> Query<With<S, C>>
     where
         C: 'static,
@@ -87,6 +139,14 @@ where
         Query::new()
     }
 
+    /// Narrow down a query to entities that do not have a certain component.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let query = Query::<(&i32,)>::new().without::<bool>();
+    /// ```
     pub fn without<C>(self) -> Query<Without<S, C>>
     where
         C: 'static,
@@ -95,6 +155,7 @@ where
     }
 }
 
+/// Borrow of a query. Required to obtain an iterator.
 pub struct QueryRef<'q, S>
 where
     S: QuerySpec,
@@ -109,6 +170,7 @@ impl<S> QueryRef<'_, S>
 where
     S: QuerySpec,
 {
+    /// Create an iterator over the query's matches.
     pub fn iter<'i>(&'i mut self) -> QueryIter<'i, S> {
         if self.active {
             panic!("Borrow already active");

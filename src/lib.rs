@@ -16,11 +16,11 @@
 //! let entity = world.alloc();
 //! world.insert(entity, (23_u32, "hello".to_string()));
 //!
-//! for number in Query::<&u32>::new().iter(&world) {
+//! for number in Query::<&u32>::new().borrow(&world).iter() {
 //!     println!("{}", number);
 //! }
 //!
-//! for (_entity, number, string) in Query::<(&Entity, &u32, &String)>::new().iter(&world) {
+//! for (_entity, number, string) in Query::<(&Entity, &u32, &String)>::new().borrow(&world).iter() {
 //!     println!("{}, {}", string, number);
 //! }
 //! ```

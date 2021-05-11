@@ -13,8 +13,8 @@ use crate::{
 /// Query to get an iterator over all entities with a certain combination of components.
 ///
 /// Queries are provided as stand-alone structs to allow for prepared queries that can be
-/// re-used, for optimzation. Hence, queries neet to borrow the [World] before they can be iterated
-/// (see [Query::borrow]).
+/// re-used, as an optimzation. Hence, queries neet to borrow the [World] before their results
+/// can be iterated (see [Query::borrow]).
 ///
 /// # Examples
 ///
@@ -87,7 +87,7 @@ where
     ///     println!("{}, {}", i, b);
     /// }
     /// ```
-    pub fn borrow<'q>(&'q mut self, world: &'q World) -> QueryRef<'q, S> {
+    pub fn borrow<'w>(&'w mut self, world: &'w World) -> QueryRef<'w, S> {
         let tag_gen = world.tag_gen();
         let archetypes = world.archetypes();
 
@@ -97,8 +97,8 @@ where
             self.find(archetypes);
         }
 
-        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(&*self.types) };
-        let refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref> = unsafe { transmute(&mut self.refs) };
+        let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
+        let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
 
         for (idx, ty) in types {
             let archetype = &archetypes[*idx];
@@ -164,13 +164,13 @@ where
 }
 
 /// Borrow of the [World] for a [Query]. Required to obtain an iterator.
-pub struct QueryRef<'q, S>
+pub struct QueryRef<'w, S>
 where
     S: QuerySpec,
 {
-    types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)],
-    archetypes: &'q [Archetype],
-    refs: &'q mut Vec<<S::Fetch as Fetch<'q>>::Ref>,
+    types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)],
+    archetypes: &'w [Archetype],
+    refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
     active: bool,
 }
 
@@ -179,13 +179,13 @@ where
     S: QuerySpec,
 {
     /// Create an iterator over the entities matching the query.
-    pub fn iter<'i>(&'i mut self) -> QueryIter<'i, S> {
+    pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
         if self.active {
             panic!("Borrow already active");
         }
         self.active = true;
 
-        let types: &'i [(usize, <S::Fetch as Fetch<'i>>::Ty)] = unsafe { transmute(self.types) };
+        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
 
         QueryIter {
             types: types.iter(),

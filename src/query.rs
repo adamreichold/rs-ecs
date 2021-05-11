@@ -12,6 +12,10 @@ use crate::{
 
 /// Query to get an iterator over all entities with a certain combination of components.
 ///
+/// Queries are provided as stand-alone structs to allow for prepared queries that can be
+/// re-used, for optimzation. Hence, queries neet to borrow the [World] before they can be iterated
+/// (see [Query::borrow]).
+///
 /// # Examples
 ///
 /// ```
@@ -69,7 +73,7 @@ where
         }
     }
 
-    /// Borrow the world to allow for iterating the query.
+    /// Borrow the [World] to allow for iterating the query.
     ///
     /// # Examples
     ///
@@ -174,7 +178,7 @@ impl<S> QueryRef<'_, S>
 where
     S: QuerySpec,
 {
-    /// Create an iterator over the query's matches.
+    /// Create an iterator over the entities matching the query.
     pub fn iter<'i>(&'i mut self) -> QueryIter<'i, S> {
         if self.active {
             panic!("Borrow already active");
@@ -406,7 +410,12 @@ where
 /// A query specification to iterate over entities with a certain component,
 /// but without borrowing that component.
 ///
+/// See also [Query::with()]
+///
 /// # Examples
+///
+/// A query for components of type `u32` and `bool`,
+/// only matching entities with a component of type `f32`.
 ///
 /// ```
 /// # use rs_ecs::*;
@@ -461,7 +470,12 @@ where
 
 /// A query specification to iterate over entities without a certain component.
 ///
+/// See also [Query::without()]
+///
 /// # Examples
+///
+/// A query for components of type `u32` and `bool`,
+/// only matching entities without a component of type `f32`.
 ///
 /// ```
 /// # use rs_ecs::*;

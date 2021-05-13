@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
-use std::mem::transmute;
+use std::mem::{transmute, ManuallyDrop};
 use std::ptr::{null, null_mut};
 use std::slice::Iter;
 
@@ -39,7 +39,7 @@ where
 {
     tag_gen: (u32, u32),
     types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
-    refs: Vec<<S::Fetch as Fetch<'static>>::Ref>,
+    refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
 }
 
 impl<S> Default for Query<S>
@@ -96,6 +96,8 @@ where
 
             self.find(archetypes);
         }
+
+        self.refs.clear();
 
         let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
@@ -595,6 +597,8 @@ impl_fetch_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 mod tests {
     use super::*;
 
+    use std::mem::forget;
+
     fn spawn_three(world: &mut World) {
         let ent = world.alloc();
         world.insert(ent, (23_i32, 42_u64));
@@ -669,6 +673,32 @@ mod tests {
         let comps = query.borrow(&world).iter().copied().collect::<Vec<_>>();
 
         assert_eq!(&comps, &[-23, -1, -42]);
+    }
+
+    #[test]
+    fn forgotten_query_ref_does_not_use_after_free() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&mut i32>::new();
+        forget(query.borrow(&world));
+
+        drop(world);
+        drop(query);
+    }
+
+    #[test]
+    #[should_panic]
+    fn forgotten_query_ref_leaks_borrows() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let mut query = Query::<&mut i32>::new();
+        forget(query.borrow(&world));
+
+        let _ = query.borrow(&world);
     }
 
     #[test]

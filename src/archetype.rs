@@ -79,6 +79,7 @@ impl Archetype {
     }
 
     #[cold]
+    #[inline(never)]
     fn grow(&mut self) {
         let new_cap = self.cap.checked_add(self.len.max(8)).unwrap() as usize;
 

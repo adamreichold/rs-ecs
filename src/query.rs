@@ -119,6 +119,7 @@ where
     }
 
     #[cold]
+    #[inline(never)]
     fn find(&mut self, archetypes: &[Archetype]) {
         self.types.clear();
 

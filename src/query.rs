@@ -237,7 +237,7 @@ where
                 let archetype = &self.archetypes[*idx];
                 self.idx = 0;
                 self.len = archetype.len();
-                self.ptr = unsafe { S::Fetch::pointer(archetype, *ty) };
+                self.ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
             }
         }
     }
@@ -279,7 +279,7 @@ pub unsafe trait Fetch<'q> {
 
     fn find(archetype: &Archetype) -> Option<Self::Ty>;
     unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref;
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
 
     fn null() -> Self::Ptr;
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item;
@@ -312,8 +312,8 @@ where
         archetype.borrow::<C>(ty)
     }
 
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        archetype.pointer::<C>(ty)
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        archetype.base_pointer::<C>(ty)
     }
 
     fn null() -> Self::Ptr {
@@ -356,8 +356,8 @@ where
         archetype.borrow_mut::<C>(ty)
     }
 
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        archetype.pointer::<C>(ty)
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        archetype.base_pointer::<C>(ty)
     }
 
     fn null() -> Self::Ptr {
@@ -396,8 +396,8 @@ where
         ty.map(|ty| F::borrow(archetype, ty))
     }
 
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        ty.map(|ty| F::pointer(archetype, ty))
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        ty.map(|ty| F::base_pointer(archetype, ty))
     }
 
     fn null() -> Self::Ptr {
@@ -457,8 +457,8 @@ where
         F::borrow(archetype, ty)
     }
 
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        F::pointer(archetype, ty)
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        F::base_pointer(archetype, ty)
     }
 
     fn null() -> Self::Ptr {
@@ -517,8 +517,8 @@ where
         F::borrow(archetype, ty)
     }
 
-    unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        F::pointer(archetype, ty)
+    unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        F::base_pointer(archetype, ty)
     }
 
     fn null() -> Self::Ptr {
@@ -571,10 +571,10 @@ macro_rules! impl_fetch_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            unsafe fn pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+            unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
                 let ($($types,)+) = ty;
 
-                ($($types::pointer(archetype, $types),)+)
+                ($($types::base_pointer(archetype, $types),)+)
             }
 
             fn null() -> Self::Ptr {

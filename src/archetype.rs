@@ -190,14 +190,14 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub unsafe fn access<C>(&mut self, idx: u32) -> *mut C
+    pub unsafe fn pointer<C>(&mut self, idx: u32) -> *mut C
     where
         C: 'static,
     {
         debug_assert!(idx < self.len);
 
         let ty = self.find::<C>().unwrap();
-        let ptr = self.pointer::<C>(ty);
+        let ptr = self.base_pointer::<C>(ty);
 
         ptr.add(idx as usize)
     }
@@ -257,7 +257,7 @@ impl Archetype {
             .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
-    pub unsafe fn pointer<C>(&self, ty: usize) -> *mut C
+    pub unsafe fn base_pointer<C>(&self, ty: usize) -> *mut C
     where
         C: 'static,
     {
@@ -278,7 +278,7 @@ impl Archetype {
 
         let ty = self.find::<C>()?;
         let _ref = self.borrow::<C>(ty);
-        let ptr = self.pointer::<C>(ty);
+        let ptr = self.base_pointer::<C>(ty);
 
         let val = &*ptr.add(idx as usize);
 
@@ -293,7 +293,7 @@ impl Archetype {
 
         let ty = self.find::<C>()?;
         let _ref = self.borrow_mut::<C>(ty);
-        let ptr = self.pointer::<C>(ty);
+        let ptr = self.base_pointer::<C>(ty);
 
         let val = &mut *ptr.add(idx as usize);
 

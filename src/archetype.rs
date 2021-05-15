@@ -99,19 +99,20 @@ impl Archetype {
 
         let mut max_align = 1;
         let mut sum_size = 0;
-        let mut new_offsets = Vec::with_capacity(types.0.len());
+        let mut new_offsets = Vec::<usize>::with_capacity(types.0.len());
 
         for ty in types.0.iter() {
+            let size = ty.layout.size();
             let align = ty.layout.align();
-            let size = aligned(ty.layout.size(), align);
-            let len = size.checked_mul(new_cap).unwrap();
 
             max_align = max_align.max(align);
 
-            let offset = aligned(sum_size, align);
-            sum_size = offset.checked_add(len).unwrap();
+            debug_assert!(sum_size % align == 0);
+            new_offsets.push(sum_size);
 
-            new_offsets.push(offset);
+            sum_size = sum_size
+                .checked_add(size.checked_mul(new_cap).unwrap())
+                .unwrap();
         }
 
         let new_layout = Layout::from_size_align(sum_size, max_align).unwrap();
@@ -410,28 +411,39 @@ impl TypeMetadataSet {
     }
 }
 
-fn aligned(val: usize, align: usize) -> usize {
-    let rest = val % align;
-    if rest != 0 {
-        val.checked_add(align - rest).unwrap()
-    } else {
-        val
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn aligned_aligns() {
-        assert_eq!(aligned(0, 8), 0);
-        assert_eq!(aligned(1, 8), 8);
-        assert_eq!(aligned(7, 8), 8);
-        assert_eq!(aligned(8, 8), 8);
-        assert_eq!(aligned(9, 8), 16);
-        assert_eq!(aligned(0, 1), 0);
-        assert_eq!(aligned(1, 1), 1);
-        assert_eq!(aligned(2, 1), 2);
+    fn reverse_sorting_by_alignment_avoids_padding() {
+        let mut types = TypeMetadataSet::default();
+        types.insert::<u64>();
+        types.insert::<u32>();
+        types.insert::<u16>();
+        types.insert::<u8>();
+
+        let mut archetype = Archetype::new(types);
+        let _ent = unsafe { archetype.alloc() };
+
+        assert_eq!(archetype.layout.size(), 8 * (8 + 4 + 2 + 1));
+        assert_eq!(archetype.layout.align(), 8);
+
+        assert_eq!(archetype.len, 1);
+        assert_eq!(archetype.cap, 8);
+
+        assert_eq!(archetype.types.len(), 4);
+
+        let ty = archetype.find::<u64>().unwrap();
+        assert_eq!(archetype.types[ty].offset, 0);
+
+        let ty = archetype.find::<u32>().unwrap();
+        assert_eq!(archetype.types[ty].offset, 8 * 8);
+
+        let ty = archetype.find::<u16>().unwrap();
+        assert_eq!(archetype.types[ty].offset, 8 * (8 + 4));
+
+        let ty = archetype.find::<u8>().unwrap();
+        assert_eq!(archetype.types[ty].offset, 8 * (8 + 4 + 2));
     }
 }

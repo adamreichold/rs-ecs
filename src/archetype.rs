@@ -23,7 +23,7 @@ impl Archetype {
             .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
-        let ptr = NonNull::new(max_align as *mut u8).unwrap();
+        let ptr = NonNull::new(layout.align() as *mut u8).unwrap();
 
         Self {
             types: types.0.into(),
@@ -81,9 +81,7 @@ impl Archetype {
     #[cold]
     #[inline(never)]
     fn grow(&mut self) {
-        let new_cap = self.cap.checked_add(self.len.max(8)).unwrap() as usize;
-
-        let old_offsets = self.types.iter().map(|ty| ty.offset).collect::<Vec<_>>();
+        let new_cap = self.cap.checked_add(self.cap.max(8)).unwrap() as usize;
 
         struct SortOnDrop<'a>(&'a mut [TypeMetadata]);
 
@@ -101,46 +99,51 @@ impl Archetype {
 
         let mut max_align = 1;
         let mut sum_size = 0;
-        for ty in types.0.iter_mut() {
+        let mut new_offsets = Vec::with_capacity(types.0.len());
+
+        for ty in types.0.iter() {
             let align = ty.layout.align();
             let size = aligned(ty.layout.size(), align);
             let len = size.checked_mul(new_cap).unwrap();
 
             max_align = max_align.max(align);
 
-            ty.offset = aligned(sum_size, align);
-            sum_size = ty.offset.checked_add(len).unwrap();
+            let offset = aligned(sum_size, align);
+            sum_size = offset.checked_add(len).unwrap();
+
+            new_offsets.push(offset);
         }
 
-        drop(types);
-
         let new_layout = Layout::from_size_align(sum_size, max_align).unwrap();
-        let new_ptr;
+        let new_ptr = NonNull::new(if new_layout.size() != 0 {
+            unsafe { alloc(new_layout) }
+        } else {
+            new_layout.align() as *mut u8
+        })
+        .unwrap();
 
-        unsafe {
-            new_ptr = if sum_size != 0 {
-                alloc(new_layout)
-            } else {
-                max_align as *mut u8
-            };
+        if self.layout.size() != 0 {
+            let old_ptr = self.ptr.get_mut().as_ptr();
 
-            if self.layout.size() != 0 {
-                let old_ptr = self.ptr.get_mut().as_ptr();
-
-                for (ty, old_offset) in self.types.iter().zip(old_offsets) {
+            unsafe {
+                for (ty, new_offset) in types.0.iter().zip(&new_offsets) {
                     copy_nonoverlapping(
-                        old_ptr.add(old_offset),
-                        new_ptr.add(ty.offset),
-                        ty.layout.size() * self.len as usize,
+                        old_ptr.add(ty.offset),
+                        new_ptr.as_ptr().add(*new_offset),
+                        ty.layout.size() * self.cap as usize,
                     );
                 }
 
-                dealloc(self.ptr.get_mut().as_ptr(), self.layout);
+                dealloc(old_ptr, self.layout);
             }
         }
 
         self.layout = new_layout;
-        *self.ptr.get_mut() = NonNull::new(new_ptr).unwrap();
+        *self.ptr.get_mut() = new_ptr;
+
+        for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
+            ty.offset = *new_offset;
+        }
 
         self.cap = new_cap as u32;
     }

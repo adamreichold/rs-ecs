@@ -89,19 +89,16 @@ where
     /// }
     /// ```
     pub fn borrow<'w>(&'w mut self, world: &'w World) -> QueryRef<'w, S> {
-        let tag_gen = world.tag_gen();
-        let archetypes = world.archetypes();
-
-        if self.tag_gen != tag_gen {
-            self.tag_gen = tag_gen;
-
-            self.find(archetypes);
+        if self.tag_gen != world.tag_gen() {
+            self.find(world);
         }
 
         self.refs.clear();
 
         let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
+
+        let archetypes = world.archetypes();
 
         for (idx, ty) in types {
             let archetype = &archetypes[*idx];
@@ -115,20 +112,21 @@ where
             types,
             archetypes,
             refs,
-            active: false,
         }
     }
 
     #[cold]
     #[inline(never)]
-    fn find(&mut self, archetypes: &[Archetype]) {
+    fn find(&mut self, world: &World) {
         self.types.clear();
 
-        for (idx, archetype) in archetypes.iter().enumerate() {
+        for (idx, archetype) in world.archetypes().iter().enumerate() {
             if let Some(ty) = S::Fetch::find(archetype) {
                 self.types.push((idx, ty));
             }
         }
+
+        self.tag_gen = world.tag_gen();
     }
 
     /// Narrow down a query to entities that have a certain component,

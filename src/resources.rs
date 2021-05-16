@@ -12,16 +12,16 @@ use std::ops::{Deref, DerefMut};
 ///
 /// ```
 /// # use rs_ecs::*;
-/// struct MyResource(u32);
+/// struct WrapperType(u32);
 ///
 /// let mut resources = Resources::new();
 ///
 /// // Insert multiple resources
 /// resources.insert(42_u32);
-/// resources.insert(MyResource(0));
+/// resources.insert(WrapperType(23));
 ///
 /// // Borrow a resource immutably
-/// let my_res = resources.get::<MyResource>();
+/// let wrapped_res = resources.get::<WrapperType>();
 ///
 /// // Borrow a resource mutably
 /// let mut u32_res = resources.get_mut::<u32>();
@@ -30,14 +30,14 @@ use std::ops::{Deref, DerefMut};
 pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>, BuildHasherDefault<TypeIdHasher>>);
 
 impl Default for Resources {
-    /// Create an empty resources map. Synonym for [Self::new()].
+    /// Create an empty resources map.
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl Resources {
-    /// Create an empty resources map. Synonym for [Self::default()].
+    /// Create an empty resources map.
     pub fn new() -> Self {
         Self(Default::default())
     }

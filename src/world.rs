@@ -17,14 +17,14 @@ pub struct World {
 }
 
 impl Default for World {
-    /// Create an empty world. Synonym for [Self::new()].
+    /// Create an empty world.
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl World {
-    /// Create an empty world. Synonym for [Self::default()].
+    /// Create an empty world.
     pub fn new() -> Self {
         let mut empty_archetype = TypeMetadataSet::default();
         empty_archetype.insert::<Entity>();

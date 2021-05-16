@@ -46,6 +46,7 @@ impl<S> Default for Query<S>
 where
     S: QuerySpec,
 {
+    /// Create a query.
     fn default() -> Self {
         Self::new()
     }

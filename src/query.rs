@@ -173,7 +173,6 @@ where
     types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)],
     archetypes: &'w [Archetype],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
-    active: bool,
 }
 
 impl<S> QueryRef<'_, S>
@@ -182,11 +181,6 @@ where
 {
     /// Create an iterator over the entities matching the query.
     pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
-        if self.active {
-            panic!("Borrow already active");
-        }
-        self.active = true;
-
         let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
 
         QueryIter {
@@ -702,8 +696,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn borrows_can_only_be_activated_once() {
+    fn borrows_can_be_reused() {
         let mut world = World::new();
 
         spawn_three(&mut world);
@@ -711,8 +704,11 @@ mod tests {
         let mut query = Query::<&i32>::new();
         let mut query = query.borrow(&world);
 
-        let _ = query.iter();
-        query.iter();
+        let cnt1 = query.iter().count();
+        let cnt2 = query.iter().count();
+
+        assert_eq!(cnt1, 3);
+        assert_eq!(cnt2, cnt1);
     }
 
     #[test]

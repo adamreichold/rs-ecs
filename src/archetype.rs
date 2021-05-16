@@ -66,10 +66,12 @@ impl Archetype {
 
         if idx != self.len {
             for ty in &*self.types {
-                let src_ptr = ptr.add(ty.offset + ty.layout.size() * self.len as usize);
-                let dst_ptr = ptr.add(ty.offset + ty.layout.size() * idx as usize);
+                let size = ty.layout.size();
 
-                copy_nonoverlapping(src_ptr, dst_ptr, ty.layout.size());
+                let src_ptr = ptr.add(ty.offset + size * self.len as usize);
+                let dst_ptr = ptr.add(ty.offset + size * idx as usize);
+
+                copy_nonoverlapping(src_ptr, dst_ptr, size);
             }
 
             true

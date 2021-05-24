@@ -1,6 +1,6 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::any::{type_name, TypeId};
-use std::cell::{Ref, RefCell, RefMut, UnsafeCell};
+use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Reverse;
 use std::ops::{Deref, DerefMut};
 use std::ptr::{copy_nonoverlapping, NonNull};
@@ -10,7 +10,7 @@ pub struct Archetype {
     layout: Layout,
     len: u32,
     cap: u32,
-    ptr: UnsafeCell<NonNull<u8>>,
+    ptr: NonNull<u8>,
 }
 
 impl Archetype {
@@ -30,7 +30,7 @@ impl Archetype {
             layout,
             len: 0,
             cap: 0,
-            ptr: UnsafeCell::new(ptr),
+            ptr,
         }
     }
 }
@@ -52,7 +52,7 @@ impl Archetype {
 
     #[must_use]
     pub unsafe fn free(&mut self, idx: u32, drop: bool) -> bool {
-        let ptr = self.ptr.get_mut().as_ptr();
+        let ptr = self.ptr.as_ptr();
 
         if drop {
             for ty in &*self.types {
@@ -126,7 +126,7 @@ impl Archetype {
         .unwrap();
 
         if self.layout.size() != 0 {
-            let old_ptr = self.ptr.get_mut().as_ptr();
+            let old_ptr = self.ptr.as_ptr();
 
             unsafe {
                 for (ty, new_offset) in types.0.iter().zip(&new_offsets) {
@@ -142,7 +142,7 @@ impl Archetype {
         }
 
         self.layout = new_layout;
-        *self.ptr.get_mut() = new_ptr;
+        self.ptr = new_ptr;
 
         for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
             ty.offset = *new_offset;
@@ -155,7 +155,7 @@ impl Archetype {
 impl Drop for Archetype {
     fn drop(&mut self) {
         if self.layout.size() != 0 {
-            let ptr = self.ptr.get_mut().as_ptr();
+            let ptr = self.ptr.as_ptr();
 
             unsafe {
                 for ty in &*self.types {
@@ -215,8 +215,8 @@ impl Archetype {
 
         let mut dst_types = &*dst.types;
 
-        let src_ptr = src.ptr.get_mut().as_ptr();
-        let dst_ptr = dst.ptr.get_mut().as_ptr();
+        let src_ptr = src.ptr.as_ptr();
+        let dst_ptr = dst.ptr.as_ptr();
 
         for src_ty in &*src.types {
             let dst_ty = match dst_types.iter().position(|ty| ty.id == src_ty.id) {
@@ -272,7 +272,7 @@ impl Archetype {
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        (*self.ptr.get()).as_ptr().add(ty.offset).cast::<C>()
+        self.ptr.as_ptr().add(ty.offset).cast::<C>()
     }
 }
 

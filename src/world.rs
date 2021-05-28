@@ -2,6 +2,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
@@ -104,7 +105,7 @@ impl World {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen);
 
-        meta.gen = meta.gen.checked_add(1).unwrap();
+        meta.gen = unsafe { NonZeroU32::new_unchecked(meta.gen.get().checked_add(1).unwrap()) };
         ent.gen = meta.gen;
 
         let old_archetype = &mut self.archetypes[meta.ty as usize];
@@ -338,14 +339,24 @@ impl World {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entity {
     id: u32,
-    gen: u32,
+    gen: NonZeroU32,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct EntityMetadata {
-    gen: u32,
+    gen: NonZeroU32,
     ty: u32,
     idx: u32,
+}
+
+impl Default for EntityMetadata {
+    fn default() -> Self {
+        Self {
+            gen: unsafe { NonZeroU32::new_unchecked(1) },
+            ty: 0,
+            idx: 0,
+        }
+    }
 }
 
 pub unsafe trait Bundle: 'static {
@@ -427,6 +438,8 @@ impl Hasher for IndexTypeIdHasher {
 mod tests {
     use super::*;
 
+    use std::mem::size_of;
+
     #[test]
     fn alloc_creates_unique_entities() {
         let mut world = World::new();
@@ -498,7 +511,7 @@ mod tests {
         let ent = world.alloc();
 
         assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].gen.get(), 1);
         assert_eq!(world.entities[0].ty, 0);
         assert_eq!(world.entities[0].idx, 0);
 
@@ -511,7 +524,7 @@ mod tests {
         world.insert(ent, (23_i32,));
 
         assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].gen.get(), 1);
         assert_eq!(world.entities[0].ty, 1);
         assert_eq!(world.entities[0].idx, 0);
 
@@ -541,7 +554,7 @@ mod tests {
         let ent = world.alloc();
 
         assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].gen.get(), 1);
         assert_eq!(world.entities[0].ty, 0);
         assert_eq!(world.entities[0].idx, 0);
 
@@ -554,7 +567,7 @@ mod tests {
         world.insert(ent, (23_i32, 42_u64));
 
         assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].gen.get(), 1);
         assert_eq!(world.entities[0].ty, 1);
         assert_eq!(world.entities[0].idx, 0);
 
@@ -571,7 +584,7 @@ mod tests {
         world.remove::<(i32,)>(ent).unwrap();
 
         assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen, 0);
+        assert_eq!(world.entities[0].gen.get(), 1);
         assert_eq!(world.entities[0].ty, 2);
         assert_eq!(world.entities[0].idx, 0);
 
@@ -668,5 +681,10 @@ mod tests {
 
         let ent = world.alloc();
         let _ = world.remove::<(Entity,)>(ent);
+    }
+
+    #[test]
+    fn entity_has_niche() {
+        assert_eq!(size_of::<Entity>(), size_of::<Option<Entity>>());
     }
 }

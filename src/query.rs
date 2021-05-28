@@ -12,8 +12,21 @@ use crate::{
 
 /// Query to get an iterator over all entities with a certain combination of components.
 ///
+/// Queries are specified through their type argument, by composing the type of their result.
+/// The following type specifications are possible:
+///
+/// * `&C` - shared, immutable reference to components of type `C`
+/// * `&mut C` - exclusive, mutable reference
+/// * `(P, Q, R)` - combine multiple queries
+/// * `Option<Q>` - optional component(s)
+/// * `With<Q, C>` to filter `Q` for presence of `C`
+/// * `Without<Q, C>` to filter `Q` for absence of `C`
+///
+/// Note that [Entities](Entity) are components themselves, so they can be optionally obtained in a query,
+/// like `Query<Entity, &C, &mut D>`.
+///
 /// Queries are provided as stand-alone structs to allow for prepared queries that can be
-/// re-used, as an optimzation. Hence, queries neet to borrow the [World] before their results
+/// re-used, as an optimzation. Hence, queries need to borrow the [World] before their results
 /// can be iterated (see [Query::borrow]).
 ///
 /// # Examples
@@ -22,17 +35,58 @@ use crate::{
 /// # use rs_ecs::*;
 /// let mut world = World::new();
 ///
-/// let entity = world.alloc();
-/// world.insert(entity, (0_i32, true));
+/// let entity1 = world.alloc();
+/// world.insert(entity1, (42_i32, 23_u32, 1.0_f32));
 ///
-/// let entity = world.alloc();
-/// world.insert(entity, (42_i32, 23_u32, 1.0_f32));
+/// let entity2 = world.alloc();
+/// world.insert(entity2, (0_i32, true));
 ///
-/// let mut query = Query::<(&i32, &mut bool)>::new();
-/// for (i, b) in query.borrow(&world).iter() {
-///     *b = *i > 10;
+/// let mut query = Query::<(&mut i32, Option<(&u32, &mut f32)>)>::new();
+/// for (i, opt) in query.borrow(&world).iter() {
+///     if let Some((u, f)) = opt {
+///         *i += *u as i32;
+///         *f += 1.0
+///     } else {
+///         *i -= 1;
+///     }
+/// }
+///
+/// assert_eq!(*world.get::<i32>(entity1).unwrap(), 65);
+/// assert_eq!(*world.get::<f32>(entity1).unwrap(), 2.0);
+/// assert_eq!(*world.get::<i32>(entity2).unwrap(), -1);
+/// ```
+///
+/// Use of a prepared query that is stored and reused for optimization:
+///
+/// ```
+/// # use rs_ecs::*;
+/// #[derive(Default)]
+/// struct System {
+///     query: Query<(&'static i32, &'static mut bool)>
+/// }
+///
+/// impl System {
+///     pub fn update(&mut self, world: &World) {
+///         for (i, b) in self.query.borrow(world).iter() {
+///             *b = *i >= 0;
+///         }
+///     }
+/// }
+///
+/// fn main() {
+///     let mut world = World::new();
+///
+///     let entity = world.alloc();
+///     world.insert(entity, (23_i32, false));
+///
+///     let mut system = System::default();
+///
+///     for _ in 0..42 {
+///         system.update(&world);
+///     }
 /// }
 /// ```
+///
 pub struct Query<S>
 where
     S: QuerySpec,

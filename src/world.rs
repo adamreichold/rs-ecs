@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
 
-/// The ECS world storing [Entity] and components.
+/// The ECS world storing [Entities](Entity) and components.
 pub struct World {
     tag: u32,
     entities: Vec<EntityMetadata>,

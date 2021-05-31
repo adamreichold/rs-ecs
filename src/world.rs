@@ -282,6 +282,8 @@ impl World {
 
     /// Get an immutable reference to the component of the given type for an [Entity].
     ///
+    /// Note that for repeated calls, [QueryRef::map()](struct.QueryRef.html#method.map) can be used to amortize the set-up costs.
+    ///
     /// # Example
     ///
     /// ```
@@ -304,6 +306,8 @@ impl World {
     }
 
     /// Get a mutable reference to the component of the given type for an [Entity].
+    ///
+    /// Note that for repeated calls, [QueryRef::map()](struct.QueryRef.html#method.map) can be used to amortize the set-up costs.
     ///
     /// # Example
     ///

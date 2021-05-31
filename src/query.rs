@@ -251,6 +251,27 @@ where
     }
 
     /// Create a map of the entities matching the query.
+    ///
+    /// This is an alternative to [get](World::get) and [get_mut](World::get_mut) for repeated calls, to amortize the set-up costs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_i32, 1.0_f32));
+    ///
+    /// let mut query = Query::<(&i32, &f32)>::new();
+    /// let mut query = query.borrow(&world);
+    /// let mut query = query.map();
+    ///
+    /// let (i, f) = query.get(entity).unwrap();
+    ///
+    /// assert_eq!(*i, 42);
+    /// assert_eq!(*f, 1.0);
+    /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
         let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
         let ptrs: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =

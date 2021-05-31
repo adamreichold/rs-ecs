@@ -10,9 +10,9 @@ use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
 /// The ECS world storing [Entities](Entity) and components.
 pub struct World {
     tag: u32,
-    entities: Vec<EntityMetadata>,
+    pub(crate) entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
-    archetypes: Vec<Archetype>,
+    pub(crate) archetypes: Vec<Archetype>,
     insert_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
     remove_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
 }
@@ -126,10 +126,6 @@ impl World {
     pub(crate) fn tag_gen(&self) -> (u32, u32) {
         debug_assert!(!self.archetypes.is_empty());
         (self.tag, self.archetypes.len() as u32)
-    }
-
-    pub(crate) fn archetypes(&self) -> &[Archetype] {
-        &self.archetypes
     }
 
     /// Insert components for a given [Entity].
@@ -338,15 +334,15 @@ impl World {
 /// An opaque entity identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entity {
-    id: u32,
-    gen: NonZeroU32,
+    pub(crate) id: u32,
+    pub(crate) gen: NonZeroU32,
 }
 
 #[derive(Clone, Copy)]
-struct EntityMetadata {
-    gen: NonZeroU32,
-    ty: u32,
-    idx: u32,
+pub struct EntityMetadata {
+    pub gen: NonZeroU32,
+    pub ty: u32,
+    pub idx: u32,
 }
 
 impl Default for EntityMetadata {

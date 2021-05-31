@@ -7,7 +7,7 @@ use std::slice::Iter;
 
 use crate::{
     archetype::Archetype,
-    world::{Entity, World},
+    world::{Entity, EntityMetadata, World},
 };
 
 /// Query to get an iterator over all entities with a certain combination of components.
@@ -94,6 +94,7 @@ where
     tag_gen: (u32, u32),
     types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
+    ptrs: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
 }
 
 impl<S> Default for Query<S>
@@ -125,6 +126,7 @@ where
             tag_gen: Default::default(),
             types: Default::default(),
             refs: Default::default(),
+            ptrs: Default::default(),
         }
     }
 
@@ -151,11 +153,11 @@ where
 
         let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
-
-        let archetypes = world.archetypes();
+        let ptrs: &'w mut Vec<(u32, <S::Fetch as Fetch<'w>>::Ptr)> =
+            unsafe { transmute(&mut self.ptrs) };
 
         for (idx, ty) in types {
-            let archetype = &archetypes[*idx];
+            let archetype = &world.archetypes[*idx];
 
             if archetype.len() != 0 {
                 refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
@@ -163,9 +165,10 @@ where
         }
 
         QueryRef {
+            world,
             types,
-            archetypes,
             refs,
+            ptrs,
         }
     }
 
@@ -174,7 +177,7 @@ where
     fn find(&mut self, world: &World) {
         self.types.clear();
 
-        for (idx, archetype) in world.archetypes().iter().enumerate() {
+        for (idx, archetype) in world.archetypes.iter().enumerate() {
             if let Some(ty) = S::Fetch::find(archetype) {
                 self.types.push((idx, ty));
             }
@@ -224,9 +227,10 @@ pub struct QueryRef<'w, S>
 where
     S: QuerySpec,
 {
+    world: &'w World,
     types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)],
-    archetypes: &'w [Archetype],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
+    ptrs: &'w mut Vec<(u32, <S::Fetch as Fetch<'w>>::Ptr)>,
 }
 
 impl<S> QueryRef<'_, S>
@@ -239,10 +243,35 @@ where
 
         QueryIter {
             types: types.iter(),
-            archetypes: self.archetypes,
+            archetypes: &self.world.archetypes,
             idx: 0,
             len: 0,
             ptr: S::Fetch::null(),
+        }
+    }
+
+    /// Create a map of the entities matching the query.
+    pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
+        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let ptrs: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
+            unsafe { transmute(&mut *self.ptrs) };
+
+        ptrs.clear();
+
+        ptrs.resize(self.world.archetypes.len(), (0, S::Fetch::null()));
+
+        for (idx, ty) in types {
+            let archetype = &self.world.archetypes[*idx];
+
+            let len = archetype.len();
+            let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+
+            ptrs[*idx] = (len, ptr);
+        }
+
+        QueryMap {
+            entities: &self.world.entities,
+            ptrs,
         }
     }
 }
@@ -309,6 +338,37 @@ where
             + self.len
             - self.idx;
         len as usize
+    }
+}
+
+/// Provides random access to the entities which match a certain [Query].
+pub struct QueryMap<'q, S>
+where
+    S: QuerySpec,
+{
+    entities: &'q [EntityMetadata],
+    ptrs: &'q [(u32, <S::Fetch as Fetch<'q>>::Ptr)],
+}
+
+impl<'q, S> QueryMap<'q, S>
+where
+    S: QuerySpec,
+{
+    /// Access the queried components of the given [Entity]
+    pub fn get<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
+        let meta = self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen);
+
+        let (len, ptr): &'m (u32, <S::Fetch as Fetch<'m>>::Ptr) =
+            unsafe { transmute(&self.ptrs[meta.ty as usize]) };
+
+        if meta.idx < *len {
+            let val = unsafe { S::Fetch::deref(*ptr, meta.idx) };
+
+            Some(val)
+        } else {
+            None
+        }
     }
 }
 
@@ -824,5 +884,26 @@ mod tests {
         let sum = query.borrow(&world).iter().sum::<i32>();
 
         assert_eq!(sum, 23 + 1);
+    }
+
+    #[test]
+    fn map_enables_access_by_entity_id() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let entities = Query::<&Entity>::new()
+            .borrow(&world)
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        let mut query = Query::<&i32>::new();
+        let mut query = query.borrow(&world);
+        let mut query = query.map();
+
+        for ent in entities {
+            query.get(ent).unwrap();
+        }
     }
 }

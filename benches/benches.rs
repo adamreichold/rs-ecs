@@ -117,11 +117,10 @@ fn insert_remove(bencher: &mut Bencher) {
     });
 }
 
-#[bench]
-fn get_component(bencher: &mut Bencher) {
+fn get_component(bencher: &mut Bencher, spawn: fn(&mut World)) {
     let mut world = World::new();
 
-    spawn_few(&mut world);
+    spawn(&mut world);
 
     let entities = Query::<&Entity>::new()
         .borrow(&world)
@@ -143,11 +142,25 @@ fn get_component(bencher: &mut Bencher) {
 }
 
 #[bench]
-fn query_single_archetype(bencher: &mut Bencher) {
+fn get_component_single_archetype(bencher: &mut Bencher) {
+    get_component(bencher, spawn_few);
+}
+
+#[bench]
+fn get_component_many_archetypes(bencher: &mut Bencher) {
+    get_component(bencher, spawn_few_in_many_archetypes);
+}
+
+#[bench]
+fn get_component_very_many_small_archetypes(bencher: &mut Bencher) {
+    get_component(bencher, spawn_few_in_very_many_small_archetypes);
+}
+
+fn query(bencher: &mut Bencher, spawn: fn(&mut World)) {
     let mut world = World::new();
     let mut query = Query::<(&mut Pos, &Vel)>::new();
 
-    spawn_few(&mut world);
+    spawn(&mut world);
 
     let _ = query.borrow(&world).iter();
 
@@ -159,44 +172,62 @@ fn query_single_archetype(bencher: &mut Bencher) {
             pos.0 += vel.0;
         }
     });
+}
+
+#[bench]
+fn query_single_archetype(bencher: &mut Bencher) {
+    query(bencher, spawn_few);
 }
 
 #[bench]
 fn query_many_archetypes(bencher: &mut Bencher) {
-    let mut world = World::new();
-    let mut query = Query::<(&mut Pos, &Vel)>::new();
-
-    spawn_few_in_many_archetypes(&mut world);
-
-    let _ = query.borrow(&world).iter();
-
-    bencher.iter(|| {
-        let world = black_box(&world);
-        let query = black_box(&mut query);
-
-        for (pos, vel) in query.borrow(world).iter() {
-            pos.0 += vel.0;
-        }
-    });
+    query(bencher, spawn_few_in_many_archetypes);
 }
 
 #[bench]
 fn query_very_many_small_archetypes(bencher: &mut Bencher) {
+    query(bencher, spawn_few_in_very_many_small_archetypes);
+}
+
+fn query_map(bencher: &mut Bencher, spawn: fn(&mut World)) {
     let mut world = World::new();
-    let mut query = Query::<(&mut Pos, &Vel)>::new();
 
-    spawn_few_in_very_many_small_archetypes(&mut world);
+    spawn(&mut world);
 
-    let _ = query.borrow(&world).iter();
+    let entities = Query::<&Entity>::new()
+        .borrow(&world)
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+
+    let mut entities = entities.iter().cycle();
+
+    let mut query = Query::<(&mut Pos, Option<&Vel>)>::default();
+    let mut query = query.borrow(&world);
+    let mut query = query.map();
 
     bencher.iter(|| {
-        let world = black_box(&world);
-        let query = black_box(&mut query);
+        let entities = black_box(&mut entities);
 
-        for (pos, vel) in query.borrow(world).iter() {
-            pos.0 += vel.0;
-        }
+        let ent = *entities.next().unwrap();
+
+        let (_pos, _vel) = query.get(ent).unwrap();
     });
+}
+
+#[bench]
+fn query_map_single_archetype(bencher: &mut Bencher) {
+    query_map(bencher, spawn_few);
+}
+
+#[bench]
+fn query_map_many_archetypes(bencher: &mut Bencher) {
+    query_map(bencher, spawn_few_in_many_archetypes);
+}
+
+#[bench]
+fn query_map_very_many_small_archetypes(bencher: &mut Bencher) {
+    query_map(bencher, spawn_few_in_very_many_small_archetypes);
 }
 
 #[bench]

@@ -257,6 +257,25 @@ impl World {
 }
 
 impl World {
+    /// Check if a given [Entity] exists.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// assert!(world.exists(entity));
+    ///
+    /// world.free(entity);
+    /// assert!(!world.exists(entity));
+    /// ```
+    pub fn exists(&self, ent: Entity) -> bool {
+        let meta = &self.entities[ent.id as usize];
+        ent.gen == meta.gen
+    }
+
     /// Check if a certain component type is present for an [Entity].
     ///
     /// # Example

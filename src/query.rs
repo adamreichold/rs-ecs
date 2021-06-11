@@ -378,7 +378,7 @@ where
     /// Access the queried components of the given [Entity]
     pub fn get<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
         let meta = self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let (len, ptr): &'m (u32, <S::Fetch as Fetch<'m>>::Ptr) =
             unsafe { transmute(&self.ptrs[meta.ty as usize]) };

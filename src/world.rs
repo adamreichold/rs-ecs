@@ -103,7 +103,7 @@ impl World {
     /// ```
     pub fn free(&mut self, mut ent: Entity) {
         let meta = &mut self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         meta.gen = unsafe { NonZeroU32::new_unchecked(meta.gen.get().checked_add(1).unwrap()) };
         ent.gen = meta.gen;
@@ -149,7 +149,7 @@ impl World {
         B: Bundle,
     {
         let meta = self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let new_ty;
 
@@ -191,7 +191,7 @@ impl World {
         B: Bundle,
     {
         let meta = self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let new_ty;
 
@@ -294,7 +294,7 @@ impl World {
         C: 'static,
     {
         let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         self.archetypes[meta.ty as usize].find::<C>().is_some()
     }
@@ -319,7 +319,7 @@ impl World {
         C: 'static,
     {
         let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         unsafe { self.archetypes[meta.ty as usize].get::<C>(meta.idx) }
     }
@@ -348,7 +348,7 @@ impl World {
         }
 
         let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen);
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
     }

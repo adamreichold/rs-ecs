@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
+use std::ops::BitXor;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
@@ -15,6 +16,7 @@ pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
     insert_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
     remove_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
+    move_into_map: HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>,
 }
 
 impl Default for World {
@@ -37,6 +39,7 @@ impl World {
             archetypes: vec![Archetype::new(empty_archetype)],
             insert_map: Default::default(),
             remove_map: Default::default(),
+            move_into_map: Default::default(),
         }
     }
 }
@@ -65,13 +68,7 @@ impl World {
     /// ```
     #[must_use]
     pub fn alloc(&mut self) -> Entity {
-        let id = if let Some(id) = self.free_list.pop() {
-            id
-        } else {
-            let id = self.entities.len().try_into().unwrap();
-            self.entities.push(Default::default());
-            id
-        };
+        let id = self.alloc_id();
 
         let meta = &mut self.entities[id as usize];
 
@@ -85,6 +82,16 @@ impl World {
         }
 
         ent
+    }
+
+    fn alloc_id(&mut self) -> u32 {
+        if let Some(id) = self.free_list.pop() {
+            id
+        } else {
+            let id = self.entities.len().try_into().unwrap();
+            self.entities.push(Default::default());
+            id
+        }
     }
 
     /// Remove an [Entity] and all its components from the world.
@@ -105,19 +112,26 @@ impl World {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        meta.gen = unsafe { NonZeroU32::new_unchecked(meta.gen.get().checked_add(1).unwrap()) };
+        meta.bump_gen();
 
-        let old_archetype = &mut self.archetypes[meta.ty as usize];
-
-        unsafe {
-            if old_archetype.free(meta.idx, true) {
-                let moved_ent = old_archetype.pointer::<Entity>(meta.idx).read();
-
-                self.entities[moved_ent.id as usize].idx = meta.idx;
-            }
-        }
+        Self::free_idx(
+            &mut self.archetypes[meta.ty as usize],
+            meta.idx,
+            true,
+            &mut self.entities,
+        );
 
         self.free_list.push(ent.id);
+    }
+
+    fn free_idx(archetype: &mut Archetype, idx: u32, drop: bool, entities: &mut [EntityMetadata]) {
+        unsafe {
+            if archetype.free(idx, drop) {
+                let swapped_ent = archetype.pointer::<Entity>(idx).read();
+
+                entities[swapped_ent.id as usize].idx = idx;
+            }
+        }
     }
 
     /// Remove all entites and their components from the world.
@@ -256,17 +270,68 @@ impl World {
 
         Archetype::move_(old_archetype, new_archetype, old_idx, new_idx);
 
-        if old_archetype.free(old_idx, false) {
-            let moved_ent = old_archetype.pointer::<Entity>(old_idx).read();
-
-            self.entities[moved_ent.id as usize].idx = old_idx;
-        }
+        Self::free_idx(old_archetype, old_idx, false, &mut self.entities);
 
         let meta = &mut self.entities[id as usize];
         meta.ty = new_ty;
         meta.idx = new_idx;
 
         new_idx
+    }
+}
+
+impl World {
+    /// Move the components of an [Entity] from this world to another
+    pub fn move_into(&mut self, ent: Entity, other: &mut World) -> Entity {
+        let meta = &mut self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
+
+        // allocate entity in other
+        let id = other.alloc_id();
+
+        let new_meta = &mut other.entities[id as usize];
+
+        // free entity in self
+        meta.bump_gen();
+
+        self.free_list.push(ent.id);
+
+        // get or insert new archetype in other
+        if let Some(ty) = self.move_into_map.get(&(meta.ty, other.tag)) {
+            new_meta.ty = *ty;
+        } else {
+            let types = self.archetypes[meta.ty as usize].types();
+
+            new_meta.ty = Self::get_or_insert(&mut other.archetypes, types);
+
+            self.move_into_map.insert((meta.ty, other.tag), new_meta.ty);
+        }
+
+        // move components from old to new archetype
+        let old_archetype = &mut self.archetypes[meta.ty as usize];
+        let new_archetype = &mut other.archetypes[new_meta.ty as usize];
+
+        unsafe {
+            new_meta.idx = new_archetype.alloc();
+
+            Archetype::move_(old_archetype, new_archetype, meta.idx, new_meta.idx);
+
+            Self::free_idx(old_archetype, meta.idx, false, &mut self.entities);
+        }
+
+        // fix entity component in other
+        let ent = Entity {
+            id,
+            gen: new_meta.gen,
+        };
+
+        unsafe {
+            other.archetypes[new_meta.ty as usize]
+                .pointer::<Entity>(new_meta.idx)
+                .write(ent);
+        }
+
+        ent
     }
 }
 
@@ -392,6 +457,12 @@ impl Default for EntityMetadata {
     }
 }
 
+impl EntityMetadata {
+    fn bump_gen(&mut self) {
+        self.gen = unsafe { NonZeroU32::new_unchecked(self.gen.get().checked_add(1).unwrap()) };
+    }
+}
+
 pub unsafe trait Bundle: 'static {
     fn insert(types: &mut TypeMetadataSet);
     #[must_use]
@@ -456,6 +527,25 @@ impl Hasher for IndexTypeIdHasher {
 
     fn write_u64(&mut self, val: u64) {
         self.0 = self.0.wrapping_mul(val);
+    }
+
+    fn write(&mut self, _val: &[u8]) {
+        unreachable!();
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Default)]
+struct U32PairHasher(u64);
+
+impl Hasher for U32PairHasher {
+    fn write_u32(&mut self, val: u32) {
+        const K: u64 = 0x517cc1b727220a95;
+
+        self.0 = self.0.rotate_left(5).bitxor(val as u64).wrapping_mul(K);
     }
 
     fn write(&mut self, _val: &[u8]) {
@@ -746,5 +836,25 @@ mod tests {
         assert_eq!(world.archetypes.len(), 2);
         assert_eq!(world.archetypes[0].len(), 0);
         assert_eq!(world.archetypes[1].len(), 0);
+    }
+
+    #[test]
+    fn entities_can_be_moved_between_worlds() {
+        let mut world1 = World::new();
+
+        let ent1 = world1.alloc();
+        world1.insert(ent1, (23, true, 42.0));
+
+        let mut world2 = World::new();
+
+        let ent2 = world1.move_into(ent1, &mut world2);
+
+        assert_eq!(*world1.move_into_map.get(&(1, world2.tag)).unwrap(), 1);
+
+        assert!(!world1.exists(ent1));
+        assert!(world2.exists(ent2));
+
+        let comp = world2.get::<i32>(ent2).unwrap();
+        assert_eq!(*comp, 23);
     }
 }

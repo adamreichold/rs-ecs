@@ -147,7 +147,7 @@ impl World {
     where
         B: Bundle,
     {
-        let meta = self.entities[ent.id as usize];
+        let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let new_ty;
@@ -158,14 +158,17 @@ impl World {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::insert(&mut types);
 
-            new_ty = self.get_or_insert(types);
+            new_ty = Self::get_or_insert(&mut self.archetypes, types);
 
             self.insert_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
             self.remove_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
         }
 
+        let old_ty = meta.ty;
+        let old_idx = meta.idx;
+
         unsafe {
-            let new_idx = self.move_(ent.id, meta.ty, new_ty, meta.idx);
+            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
 
             comps.write(&mut self.archetypes[new_ty as usize], new_idx);
         }
@@ -189,7 +192,7 @@ impl World {
     where
         B: Bundle,
     {
-        let meta = self.entities[ent.id as usize];
+        let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let new_ty;
@@ -200,34 +203,36 @@ impl World {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::remove(&mut types)?;
 
-            new_ty = self.get_or_insert(types);
+            new_ty = Self::get_or_insert(&mut self.archetypes, types);
 
             self.remove_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
             self.insert_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
         }
 
-        unsafe {
-            let comps = B::read(&mut self.archetypes[meta.ty as usize], meta.idx);
+        let old_ty = meta.ty;
+        let old_idx = meta.idx;
 
-            self.move_(ent.id, meta.ty, new_ty, meta.idx);
+        unsafe {
+            let comps = B::read(&mut self.archetypes[old_ty as usize], old_idx);
+
+            self.move_(ent.id, old_ty, new_ty, old_idx);
 
             Some(comps)
         }
     }
 
-    fn get_or_insert(&mut self, types: TypeMetadataSet) -> u32 {
-        let pos = self
-            .archetypes
+    fn get_or_insert(archetypes: &mut Vec<Archetype>, types: TypeMetadataSet) -> u32 {
+        let pos = archetypes
             .iter_mut()
             .position(|archetype| archetype.match_(&types));
 
         if let Some(pos) = pos {
             pos as u32
         } else {
-            let len = self.archetypes.len();
+            let len = archetypes.len();
             assert!(len < u32::MAX as usize);
 
-            self.archetypes.push(Archetype::new(types));
+            archetypes.push(Archetype::new(types));
 
             len as u32
         }

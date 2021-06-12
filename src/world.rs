@@ -119,6 +119,16 @@ impl World {
 
         self.free_list.push(ent.id);
     }
+
+    /// Remove all entites and their components from the world.
+    pub fn clear(&mut self) {
+        self.entities.clear();
+        self.free_list.clear();
+
+        for archetype in &mut *self.archetypes {
+            archetype.clear();
+        }
+    }
 }
 
 impl World {
@@ -709,5 +719,32 @@ mod tests {
     #[test]
     fn entity_has_niche() {
         assert_eq!(size_of::<Entity>(), size_of::<Option<Entity>>());
+    }
+
+    #[test]
+    fn world_can_be_cleared() {
+        let mut world = World::new();
+
+        let ent1 = world.alloc();
+        world.insert(ent1, (23,));
+
+        let ent2 = world.alloc();
+        world.free(ent2);
+
+        assert_eq!(world.entities.len(), 2);
+        assert_eq!(world.free_list.len(), 1);
+
+        assert_eq!(world.archetypes.len(), 2);
+        assert_eq!(world.archetypes[0].len(), 0);
+        assert_eq!(world.archetypes[1].len(), 1);
+
+        world.clear();
+
+        assert_eq!(world.entities.len(), 0);
+        assert_eq!(world.free_list.len(), 0);
+
+        assert_eq!(world.archetypes.len(), 2);
+        assert_eq!(world.archetypes[0].len(), 0);
+        assert_eq!(world.archetypes[1].len(), 0);
     }
 }

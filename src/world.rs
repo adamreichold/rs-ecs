@@ -101,12 +101,11 @@ impl World {
     ///
     /// world.free(entity);
     /// ```
-    pub fn free(&mut self, mut ent: Entity) {
+    pub fn free(&mut self, ent: Entity) {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         meta.gen = unsafe { NonZeroU32::new_unchecked(meta.gen.get().checked_add(1).unwrap()) };
-        ent.gen = meta.gen;
 
         let old_archetype = &mut self.archetypes[meta.ty as usize];
 
@@ -153,8 +152,8 @@ impl World {
 
         let new_ty;
 
-        if let Some(pos) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
-            new_ty = *pos;
+        if let Some(ty) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
+            new_ty = *ty;
         } else {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::insert(&mut types);
@@ -195,8 +194,8 @@ impl World {
 
         let new_ty;
 
-        if let Some(pos) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
-            new_ty = *pos;
+        if let Some(ty) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
+            new_ty = *ty;
         } else {
             let mut types = self.archetypes[meta.ty as usize].types();
             B::remove(&mut types)?;

@@ -305,6 +305,7 @@ impl World {
             new_meta.ty = Self::get_or_insert(&mut other.archetypes, types);
 
             self.move_into_map.insert((meta.ty, other.tag), new_meta.ty);
+            other.move_into_map.insert((new_meta.ty, self.tag), meta.ty);
         }
 
         // move components from old to new archetype
@@ -844,12 +845,14 @@ mod tests {
 
         let ent1 = world1.alloc();
         world1.insert(ent1, (23, true, 42.0));
+        world1.remove::<(bool,)>(ent1);
 
         let mut world2 = World::new();
 
         let ent2 = world1.move_into(ent1, &mut world2);
 
-        assert_eq!(*world1.move_into_map.get(&(1, world2.tag)).unwrap(), 1);
+        assert_eq!(*world1.move_into_map.get(&(2, world2.tag)).unwrap(), 1);
+        assert_eq!(*world2.move_into_map.get(&(1, world1.tag)).unwrap(), 2);
 
         assert!(!world1.exists(ent1));
         assert!(world2.exists(ent2));

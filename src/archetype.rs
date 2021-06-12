@@ -80,6 +80,25 @@ impl Archetype {
         }
     }
 
+    pub fn clear(&mut self) {
+        let len = self.len;
+        self.len = 0;
+
+        let ptr = self.ptr.as_ptr();
+
+        for ty in &*self.types {
+            unsafe {
+                let ptr = ptr.add(ty.offset);
+
+                for idx in 0..len {
+                    let ptr = ptr.add(ty.layout.size() * idx as usize);
+
+                    (ty.drop)(ptr);
+                }
+            }
+        }
+    }
+
     #[cold]
     #[inline(never)]
     fn grow(&mut self) {
@@ -154,21 +173,11 @@ impl Archetype {
 
 impl Drop for Archetype {
     fn drop(&mut self) {
+        self.clear();
+
         if self.layout.size() != 0 {
-            let ptr = self.ptr.as_ptr();
-
             unsafe {
-                for ty in &*self.types {
-                    let ptr = ptr.add(ty.offset);
-
-                    for idx in 0..self.len {
-                        let ptr = ptr.add(ty.layout.size() * idx as usize);
-
-                        (ty.drop)(ptr);
-                    }
-                }
-
-                dealloc(ptr, self.layout);
+                dealloc(self.ptr.as_ptr(), self.layout);
             }
         }
     }

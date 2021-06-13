@@ -16,7 +16,7 @@ pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
     insert_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
     remove_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
-    move_into_map: HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>,
+    transfer_map: HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>,
 }
 
 impl Default for World {
@@ -39,7 +39,7 @@ impl World {
             archetypes: vec![Archetype::new(empty_archetype)],
             insert_map: Default::default(),
             remove_map: Default::default(),
-            move_into_map: Default::default(),
+            transfer_map: Default::default(),
         }
     }
 }
@@ -281,8 +281,24 @@ impl World {
 }
 
 impl World {
-    /// Move the components of an [Entity] from this world to another
-    pub fn move_into(&mut self, ent: Entity, other: &mut World) -> Entity {
+    /// Transfer an [Entity] and its components from this world to another.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (23_i32, false, String::from("Goodbye")));
+    ///
+    /// let mut another_world = World::new();
+    /// let entity = world.transfer(entity, &mut another_world);
+    ///
+    /// let comp = another_world.get::<String>(entity).unwrap();
+    /// assert_eq!(&*comp, "Goodbye");
+    /// ```
+    pub fn transfer(&mut self, ent: Entity, other: &mut World) -> Entity {
         let meta = &mut self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
@@ -297,15 +313,15 @@ impl World {
         self.free_list.push(ent.id);
 
         // get or insert new archetype in other
-        if let Some(ty) = self.move_into_map.get(&(meta.ty, other.tag)) {
+        if let Some(ty) = self.transfer_map.get(&(meta.ty, other.tag)) {
             new_meta.ty = *ty;
         } else {
             let types = self.archetypes[meta.ty as usize].types();
 
             new_meta.ty = Self::get_or_insert(&mut other.archetypes, types);
 
-            self.move_into_map.insert((meta.ty, other.tag), new_meta.ty);
-            other.move_into_map.insert((new_meta.ty, self.tag), meta.ty);
+            self.transfer_map.insert((meta.ty, other.tag), new_meta.ty);
+            other.transfer_map.insert((new_meta.ty, self.tag), meta.ty);
         }
 
         // move components from old to new archetype
@@ -840,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn entities_can_be_moved_between_worlds() {
+    fn entities_can_be_transferred_between_worlds() {
         let mut world1 = World::new();
 
         let ent1 = world1.alloc();
@@ -849,10 +865,10 @@ mod tests {
 
         let mut world2 = World::new();
 
-        let ent2 = world1.move_into(ent1, &mut world2);
+        let ent2 = world1.transfer(ent1, &mut world2);
 
-        assert_eq!(*world1.move_into_map.get(&(2, world2.tag)).unwrap(), 1);
-        assert_eq!(*world2.move_into_map.get(&(1, world1.tag)).unwrap(), 2);
+        assert_eq!(*world1.transfer_map.get(&(2, world2.tag)).unwrap(), 1);
+        assert_eq!(*world2.transfer_map.get(&(1, world1.tag)).unwrap(), 2);
 
         assert!(!world1.exists(ent1));
         assert!(world2.exists(ent2));

@@ -1,5 +1,7 @@
 #![feature(test)]
 
+use std::mem::swap;
+
 extern crate test;
 use test::{black_box, Bencher};
 
@@ -114,6 +116,37 @@ fn insert_remove(bencher: &mut Bencher) {
 
         world.insert(ent, (Vel(0.0),));
         world.insert(ent, (Pos(0.0),));
+    });
+}
+
+#[bench]
+fn transfer(bencher: &mut Bencher) {
+    let mut world = World::new();
+
+    spawn_few(&mut world);
+
+    let mut entities = Query::<&Entity>::new()
+        .borrow(&world)
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+
+    let mut other_world = World::new();
+    let mut other_entities = Vec::new();
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let other_world = black_box(&mut other_world);
+        let entities = black_box(&mut entities);
+        let other_entities = black_box(&mut other_entities);
+
+        if let Some(ent) = entities.pop() {
+            let ent = world.transfer(ent, other_world);
+            other_entities.push(ent);
+        } else {
+            swap(world, other_world);
+            swap(entities, other_entities);
+        }
     });
 }
 

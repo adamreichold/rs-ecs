@@ -94,7 +94,7 @@ where
     tag_gen: (u32, u32),
     types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
-    ptrs: Vec<(u32, <S::Fetch as Fetch<'static>>::Ptr)>,
+    ptrs: Vec<Option<<S::Fetch as Fetch<'static>>::Ptr>>,
 }
 
 unsafe impl<S> Send for Query<S> where S: QuerySpec {}
@@ -155,7 +155,7 @@ where
 
         let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
-        let ptrs: &'w mut Vec<(u32, <S::Fetch as Fetch<'w>>::Ptr)> =
+        let ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>> =
             unsafe { transmute(&mut self.ptrs) };
 
         for (idx, ty) in types {
@@ -232,7 +232,7 @@ where
     world: &'w World,
     types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
-    ptrs: &'w mut Vec<(u32, <S::Fetch as Fetch<'w>>::Ptr)>,
+    ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>>,
 }
 
 impl<S> QueryRef<'_, S>
@@ -276,20 +276,19 @@ where
     /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
         let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
-        let ptrs: &'q mut Vec<(u32, <S::Fetch as Fetch<'q>>::Ptr)> =
+        let ptrs: &'q mut Vec<Option<<S::Fetch as Fetch<'q>>::Ptr>> =
             unsafe { transmute(&mut *self.ptrs) };
 
         ptrs.clear();
 
-        ptrs.resize(self.world.archetypes.len(), (0, S::Fetch::dangling()));
+        ptrs.resize(self.world.archetypes.len(), None);
 
         for (idx, ty) in types {
             let archetype = &self.world.archetypes[*idx];
 
-            let len = archetype.len();
             let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
 
-            ptrs[*idx] = (len, ptr);
+            ptrs[*idx] = Some(ptr);
         }
 
         QueryMap {
@@ -370,7 +369,7 @@ where
     S: QuerySpec,
 {
     entities: &'q [EntityMetadata],
-    ptrs: &'q [(u32, <S::Fetch as Fetch<'q>>::Ptr)],
+    ptrs: &'q [Option<<S::Fetch as Fetch<'q>>::Ptr>],
 }
 
 impl<'q, S> QueryMap<'q, S>
@@ -382,16 +381,10 @@ where
         let meta = self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let (len, ptr): &'m (u32, <S::Fetch as Fetch<'m>>::Ptr) =
+        let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
             unsafe { transmute(&self.ptrs[meta.ty as usize]) };
 
-        if meta.idx < *len {
-            let val = unsafe { S::Fetch::deref(*ptr, meta.idx) };
-
-            Some(val)
-        } else {
-            None
-        }
+        ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
     }
 }
 

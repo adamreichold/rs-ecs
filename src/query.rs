@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::cell::{Ref, RefMut};
 use std::marker::PhantomData;
 use std::mem::{transmute, ManuallyDrop};
-use std::ptr::{null, null_mut};
+use std::ptr::NonNull;
 use std::slice::Iter;
 
 use crate::{
@@ -248,7 +248,7 @@ where
             archetypes: &self.world.archetypes,
             idx: 0,
             len: 0,
-            ptr: S::Fetch::null(),
+            ptr: S::Fetch::dangling(),
         }
     }
 
@@ -281,7 +281,7 @@ where
 
         ptrs.clear();
 
-        ptrs.resize(self.world.archetypes.len(), (0, S::Fetch::null()));
+        ptrs.resize(self.world.archetypes.len(), (0, S::Fetch::dangling()));
 
         for (idx, ty) in types {
             let archetype = &self.world.archetypes[*idx];
@@ -412,7 +412,7 @@ pub unsafe trait Fetch<'q> {
     unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref;
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
 
-    fn null() -> Self::Ptr;
+    fn dangling() -> Self::Ptr;
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item;
 }
 
@@ -431,7 +431,7 @@ where
 {
     type Ty = usize;
     type Ref = Ref<'q, ()>;
-    type Ptr = *const C;
+    type Ptr = NonNull<C>;
 
     type Item = &'q C;
 
@@ -444,15 +444,15 @@ where
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        archetype.base_pointer::<C>(ty)
+        NonNull::new_unchecked(archetype.base_pointer::<C>(ty))
     }
 
-    fn null() -> Self::Ptr {
-        null()
+    fn dangling() -> Self::Ptr {
+        NonNull::dangling()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
-        &*ptr.add(idx as usize)
+        &*ptr.as_ptr().add(idx as usize)
     }
 }
 
@@ -471,7 +471,7 @@ where
 {
     type Ty = usize;
     type Ref = RefMut<'q, ()>;
-    type Ptr = *mut C;
+    type Ptr = NonNull<C>;
 
     type Item = &'q mut C;
 
@@ -488,15 +488,15 @@ where
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-        archetype.base_pointer::<C>(ty)
+        NonNull::new_unchecked(archetype.base_pointer::<C>(ty))
     }
 
-    fn null() -> Self::Ptr {
-        null_mut()
+    fn dangling() -> Self::Ptr {
+        NonNull::dangling()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
-        &mut *ptr.add(idx as usize)
+        &mut *ptr.as_ptr().add(idx as usize)
     }
 }
 
@@ -531,7 +531,7 @@ where
         ty.map(|ty| F::base_pointer(archetype, ty))
     }
 
-    fn null() -> Self::Ptr {
+    fn dangling() -> Self::Ptr {
         None
     }
 
@@ -592,8 +592,8 @@ where
         F::base_pointer(archetype, ty)
     }
 
-    fn null() -> Self::Ptr {
-        F::null()
+    fn dangling() -> Self::Ptr {
+        F::dangling()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
@@ -652,8 +652,8 @@ where
         F::base_pointer(archetype, ty)
     }
 
-    fn null() -> Self::Ptr {
-        F::null()
+    fn dangling() -> Self::Ptr {
+        F::dangling()
     }
 
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
@@ -708,8 +708,8 @@ macro_rules! impl_fetch_for_tuples {
                 ($($types::base_pointer(archetype, $types),)+)
             }
 
-            fn null() -> Self::Ptr {
-                ($($types::null(),)+)
+            fn dangling() -> Self::Ptr {
+                ($($types::dangling(),)+)
             }
 
             #[allow(non_snake_case)]
@@ -728,7 +728,7 @@ impl_fetch_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 mod tests {
     use super::*;
 
-    use std::mem::forget;
+    use std::mem::{forget, size_of};
 
     fn spawn_three(world: &mut World) {
         let ent = world.alloc();
@@ -928,5 +928,13 @@ mod tests {
         for ent in entities {
             query.get(ent).unwrap();
         }
+    }
+
+    #[test]
+    fn fetch_ptr_has_niche() {
+        assert_eq!(
+            size_of::<<<(&i32, &mut f64) as QuerySpec>::Fetch as Fetch>::Ptr>(),
+            size_of::<Option<<<(&i32, &mut f64) as QuerySpec>::Fetch as Fetch>::Ptr>>()
+        );
     }
 }

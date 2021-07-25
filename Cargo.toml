@@ -7,6 +7,9 @@ authors = ["Adam Reichold <adam.reichold@t-online.de>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/adamreichold/rs-ecs"
 
+[dependencies]
+rayon = { version = "1.5", optional = true }
+
 [profile.bench]
 debug = true
 lto = true

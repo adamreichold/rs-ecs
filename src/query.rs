@@ -6,10 +6,16 @@ use std::mem::{transmute, ManuallyDrop};
 use std::ptr::NonNull;
 use std::slice::Iter;
 
+#[cfg(feature = "rayon")]
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 use crate::{
     archetype::Archetype,
     world::{Entity, EntityMetadata, World},
 };
+
+#[cfg(feature = "rayon")]
+use crate::rayon::ArchetypeIterFactory;
 
 /// Query to get an iterator over all entities with a certain combination of components.
 ///
@@ -251,6 +257,24 @@ where
             len: 0,
             ptr: S::Fetch::dangling(),
         }
+    }
+
+    #[cfg(feature = "rayon")]
+    /// Create a parallel iterator over the entities matching the query.
+    pub fn par_iter<'q>(
+        &'q mut self,
+    ) -> impl ParallelIterator<Item = <S::Fetch as Fetch<'q>>::Item> + 'q
+    where
+        <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
+        <S::Fetch as Fetch<'q>>::Item: Send,
+    {
+        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+
+        let factory = ArchetypeIterFactory::new(&self.world.archetypes);
+
+        types
+            .into_par_iter()
+            .flat_map(move |(idx, ty)| unsafe { factory.iter::<S>(*idx, *ty) })
     }
 
     /// Create a map of the entities matching the query.

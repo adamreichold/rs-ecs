@@ -5,6 +5,9 @@ use std::mem::swap;
 extern crate test;
 use test::{black_box, Bencher};
 
+#[cfg(feature = "rayon")]
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
 use rs_ecs::{Entity, Query, Resources, World};
 
 struct Pos(f32);
@@ -274,4 +277,45 @@ fn get_resource(bencher: &mut Bencher) {
         let _i32 = resources.get_mut::<i32>();
         let _f64 = resources.get::<f64>();
     });
+}
+
+#[cfg(feature = "rayon")]
+fn query_parallel(bencher: &mut Bencher, spawn: fn(&mut World)) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn(&mut world);
+
+    let _ = query.borrow(&world).iter();
+
+    bencher.iter(|| {
+        let world = black_box(&world);
+        let query = black_box(&mut query);
+
+        query
+            .borrow(world)
+            .par_iter()
+            .with_min_len(1024)
+            .for_each(|(pos, vel)| {
+                pos.0 += vel.0;
+            });
+    });
+}
+
+#[cfg(feature = "rayon")]
+#[bench]
+fn query_parallel_single_archetype(bencher: &mut Bencher) {
+    query_parallel(bencher, spawn_few);
+}
+
+#[cfg(feature = "rayon")]
+#[bench]
+fn query_parallel_many_archetypes(bencher: &mut Bencher) {
+    query_parallel(bencher, spawn_few_in_many_archetypes);
+}
+
+#[cfg(feature = "rayon")]
+#[bench]
+fn query_parallel_very_many_small_archetypes(bencher: &mut Bencher) {
+    query_parallel(bencher, spawn_few_in_very_many_small_archetypes);
 }

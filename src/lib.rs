@@ -29,6 +29,8 @@
 
 mod archetype;
 mod query;
+#[cfg(feature = "rayon")]
+mod rayon;
 mod resources;
 mod world;
 

@@ -1,7 +1,7 @@
 [package]
 name = "rs-ecs"
 description = "reasonably simple entity component system"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2018"
 authors = ["Adam Reichold <adam.reichold@t-online.de>"]
 license = "MIT OR Apache-2.0"

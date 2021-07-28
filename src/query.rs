@@ -425,7 +425,7 @@ unsafe impl<'q, C> Fetch<'q> for FetchRead<C>
 where
     C: 'static,
 {
-    type Ty = usize;
+    type Ty = u16;
     type Ref = Ref<'q, ()>;
     type Ptr = NonNull<C>;
 
@@ -465,7 +465,7 @@ unsafe impl<'q, C> Fetch<'q> for FetchWrite<C>
 where
     C: 'static,
 {
-    type Ty = usize;
+    type Ty = u16;
     type Ref = RefMut<'q, ()>;
     type Ptr = NonNull<C>;
 

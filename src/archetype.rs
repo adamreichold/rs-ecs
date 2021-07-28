@@ -15,6 +15,8 @@ pub struct Archetype {
 
 impl Archetype {
     pub fn new(types: TypeMetadataSet) -> Self {
+        assert!(types.0.len() <= u16::MAX as usize);
+
         let max_align = types
             .0
             .iter()
@@ -195,12 +197,13 @@ impl Archetype {
         lhs.eq(rhs)
     }
 
-    pub fn find<C>(&self) -> Option<usize>
+    pub fn find<C>(&self) -> Option<u16>
     where
         C: 'static,
     {
         self.types
             .binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id)
+            .map(|idx| idx as u16)
             .ok()
     }
 }
@@ -247,39 +250,43 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub unsafe fn borrow<C>(&self, ty: usize) -> Ref<'_, ()>
+    unsafe fn type_metadata<C>(&self, ty: u16) -> &TypeMetadata
     where
         C: 'static,
     {
+        let ty = ty as usize;
         debug_assert!(ty < self.types.len());
         let ty = self.types.get_unchecked(ty);
         debug_assert_eq!(ty.id, TypeId::of::<C>());
 
-        ty.borrow
+        ty
+    }
+
+    pub unsafe fn borrow<C>(&self, ty: u16) -> Ref<'_, ()>
+    where
+        C: 'static,
+    {
+        self.type_metadata::<C>(ty)
+            .borrow
             .try_borrow()
             .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
-    pub unsafe fn borrow_mut<C>(&self, ty: usize) -> RefMut<'_, ()>
+    pub unsafe fn borrow_mut<C>(&self, ty: u16) -> RefMut<'_, ()>
     where
         C: 'static,
     {
-        debug_assert!(ty < self.types.len());
-        let ty = self.types.get_unchecked(ty);
-        debug_assert_eq!(ty.id, TypeId::of::<C>());
-
-        ty.borrow
+        self.type_metadata::<C>(ty)
+            .borrow
             .try_borrow_mut()
             .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
-    pub unsafe fn base_pointer<C>(&self, ty: usize) -> *mut C
+    pub unsafe fn base_pointer<C>(&self, ty: u16) -> *mut C
     where
         C: 'static,
     {
-        debug_assert!(ty < self.types.len());
-        let ty = self.types.get_unchecked(ty);
-        debug_assert_eq!(ty.id, TypeId::of::<C>());
+        let ty = self.type_metadata::<C>(ty);
 
         self.ptr.as_ptr().add(ty.offset).cast::<C>()
     }
@@ -446,15 +453,15 @@ mod tests {
         assert_eq!(archetype.types.len(), 4);
 
         let ty = archetype.find::<u64>().unwrap();
-        assert_eq!(archetype.types[ty].offset, 0);
+        assert_eq!(archetype.types[ty as usize].offset, 0);
 
         let ty = archetype.find::<u32>().unwrap();
-        assert_eq!(archetype.types[ty].offset, 8 * 8);
+        assert_eq!(archetype.types[ty as usize].offset, 8 * 8);
 
         let ty = archetype.find::<u16>().unwrap();
-        assert_eq!(archetype.types[ty].offset, 8 * (8 + 4));
+        assert_eq!(archetype.types[ty as usize].offset, 8 * (8 + 4));
 
         let ty = archetype.find::<u8>().unwrap();
-        assert_eq!(archetype.types[ty].offset, 8 * (8 + 4 + 2));
+        assert_eq!(archetype.types[ty as usize].offset, 8 * (8 + 4 + 2));
     }
 }

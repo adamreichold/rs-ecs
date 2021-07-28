@@ -1,5 +1,6 @@
 use std::any::TypeId;
 use std::cell::{Ref, RefMut};
+use std::iter::FusedIterator;
 use std::marker::PhantomData;
 use std::mem::{transmute, ManuallyDrop};
 use std::ptr::NonNull;
@@ -362,6 +363,8 @@ where
         len as usize
     }
 }
+
+impl<S> FusedIterator for QueryIter<'_, S> where S: QuerySpec {}
 
 /// Provides random access to the entities which match a certain [Query].
 pub struct QueryMap<'q, S>

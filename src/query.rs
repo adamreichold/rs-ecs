@@ -93,7 +93,7 @@ where
     S: QuerySpec,
 {
     tag_gen: (u32, u32),
-    types: Vec<(usize, <S::Fetch as Fetch<'static>>::Ty)>,
+    types: Vec<(u32, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
     ptrs: Vec<Option<<S::Fetch as Fetch<'static>>::Ptr>>,
 }
@@ -154,13 +154,13 @@ where
 
         self.refs.clear();
 
-        let types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
+        let types: &'w [(u32, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
         let ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>> =
             unsafe { transmute(&mut self.ptrs) };
 
         for (idx, ty) in types {
-            let archetype = &world.archetypes[*idx];
+            let archetype = &world.archetypes[*idx as usize];
 
             if archetype.len() != 0 {
                 refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
@@ -182,7 +182,7 @@ where
 
         for (idx, archetype) in world.archetypes.iter().enumerate() {
             if let Some(ty) = S::Fetch::find(archetype) {
-                self.types.push((idx, ty));
+                self.types.push((idx as u32, ty));
             }
         }
 
@@ -231,7 +231,7 @@ where
     S: QuerySpec,
 {
     world: &'w World,
-    types: &'w [(usize, <S::Fetch as Fetch<'w>>::Ty)],
+    types: &'w [(u32, <S::Fetch as Fetch<'w>>::Ty)],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
     ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>>,
 }
@@ -242,7 +242,7 @@ where
 {
     /// Create an iterator over the entities matching the query.
     pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
-        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let types: &'q [(u32, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
 
         QueryIter {
             types: types.iter(),
@@ -276,7 +276,7 @@ where
     /// assert_eq!(*f, 1.0);
     /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
-        let types: &'q [(usize, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let types: &'q [(u32, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
         let ptrs: &'q mut Vec<Option<<S::Fetch as Fetch<'q>>::Ptr>> =
             unsafe { transmute(&mut *self.ptrs) };
 
@@ -285,11 +285,11 @@ where
         ptrs.resize(self.world.archetypes.len(), None);
 
         for (idx, ty) in types {
-            let archetype = &self.world.archetypes[*idx];
+            let archetype = &self.world.archetypes[*idx as usize];
 
             let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
 
-            ptrs[*idx] = Some(ptr);
+            ptrs[*idx as usize] = Some(ptr);
         }
 
         QueryMap {
@@ -313,7 +313,7 @@ pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
 {
-    types: Iter<'q, (usize, <S::Fetch as Fetch<'q>>::Ty)>,
+    types: Iter<'q, (u32, <S::Fetch as Fetch<'q>>::Ty)>,
     archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
@@ -334,7 +334,7 @@ where
                 return Some(val);
             } else {
                 let (idx, ty) = self.types.next()?;
-                let archetype = &self.archetypes[*idx];
+                let archetype = &self.archetypes[*idx as usize];
                 self.idx = 0;
                 self.len = archetype.len();
                 self.ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
@@ -356,7 +356,7 @@ where
         let len = self
             .types
             .clone()
-            .map(|(idx, _)| self.archetypes[*idx].len())
+            .map(|(idx, _)| self.archetypes[*idx as usize].len())
             .sum::<u32>()
             + self.len
             - self.idx;

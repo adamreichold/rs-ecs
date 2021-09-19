@@ -1,16 +1,16 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, TypeId};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Reverse;
 use std::ops::{Deref, DerefMut};
-use std::ptr::{copy_nonoverlapping, NonNull};
+use std::ptr::copy_nonoverlapping;
 
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
     layout: Layout,
     len: u32,
     cap: u32,
-    ptr: NonNull<u8>,
+    ptr: *mut u8,
 }
 
 impl Archetype {
@@ -25,7 +25,7 @@ impl Archetype {
             .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
-        let ptr = NonNull::new(layout.align() as *mut u8).unwrap();
+        let ptr = max_align as *mut u8;
 
         Self {
             types: types.0.into(),
@@ -54,11 +54,9 @@ impl Archetype {
 
     #[must_use]
     pub unsafe fn free(&mut self, idx: u32, drop: bool) -> bool {
-        let ptr = self.ptr.as_ptr();
-
         if drop {
             for ty in &*self.types {
-                let ptr = ptr.add(ty.offset + ty.layout.size() * idx as usize);
+                let ptr = self.ptr.add(ty.offset + ty.layout.size() * idx as usize);
 
                 (ty.drop)(ptr);
             }
@@ -70,8 +68,8 @@ impl Archetype {
             for ty in &*self.types {
                 let size = ty.layout.size();
 
-                let src_ptr = ptr.add(ty.offset + size * self.len as usize);
-                let dst_ptr = ptr.add(ty.offset + size * idx as usize);
+                let src_ptr = self.ptr.add(ty.offset + size * self.len as usize);
+                let dst_ptr = self.ptr.add(ty.offset + size * idx as usize);
 
                 copy_nonoverlapping(src_ptr, dst_ptr, size);
             }
@@ -86,11 +84,9 @@ impl Archetype {
         let len = self.len;
         self.len = 0;
 
-        let ptr = self.ptr.as_ptr();
-
         for ty in &*self.types {
             unsafe {
-                let ptr = ptr.add(ty.offset);
+                let ptr = self.ptr.add(ty.offset);
 
                 for idx in 0..len {
                     let ptr = ptr.add(ty.layout.size() * idx as usize);
@@ -139,26 +135,26 @@ impl Archetype {
         }
 
         let new_layout = Layout::from_size_align(sum_size, max_align).unwrap();
-        let new_ptr = NonNull::new(if new_layout.size() != 0 {
+        let new_ptr = if new_layout.size() != 0 {
             unsafe { alloc(new_layout) }
         } else {
             new_layout.align() as *mut u8
-        })
-        .unwrap();
+        };
+        if new_ptr.is_null() {
+            handle_alloc_error(new_layout);
+        }
 
         if self.layout.size() != 0 {
-            let old_ptr = self.ptr.as_ptr();
-
             unsafe {
                 for (ty, new_offset) in types.0.iter().zip(&new_offsets) {
                     copy_nonoverlapping(
-                        old_ptr.add(ty.offset),
-                        new_ptr.as_ptr().add(*new_offset),
+                        self.ptr.add(ty.offset),
+                        new_ptr.add(*new_offset),
                         ty.layout.size() * self.cap as usize,
                     );
                 }
 
-                dealloc(old_ptr, self.layout);
+                dealloc(self.ptr, self.layout);
             }
         }
 
@@ -179,7 +175,7 @@ impl Drop for Archetype {
 
         if self.layout.size() != 0 {
             unsafe {
-                dealloc(self.ptr.as_ptr(), self.layout);
+                dealloc(self.ptr, self.layout);
             }
         }
     }
@@ -227,9 +223,6 @@ impl Archetype {
 
         let mut dst_types = &*dst.types;
 
-        let src_ptr = src.ptr.as_ptr();
-        let dst_ptr = dst.ptr.as_ptr();
-
         for src_ty in &*src.types {
             let dst_ty = match dst_types.iter().position(|ty| ty.id == src_ty.id) {
                 Some(dst_ty) => {
@@ -241,8 +234,8 @@ impl Archetype {
 
             let size = src_ty.layout.size();
 
-            let src_ptr = src_ptr.add(src_ty.offset + size * src_idx as usize);
-            let dst_ptr = dst_ptr.add(dst_ty.offset + size * dst_idx as usize);
+            let src_ptr = src.ptr.add(src_ty.offset + size * src_idx as usize);
+            let dst_ptr = dst.ptr.add(dst_ty.offset + size * dst_idx as usize);
 
             copy_nonoverlapping(src_ptr, dst_ptr, size);
         }
@@ -288,7 +281,7 @@ impl Archetype {
     {
         let ty = self.type_metadata::<C>(ty);
 
-        self.ptr.as_ptr().add(ty.offset).cast::<C>()
+        self.ptr.add(ty.offset).cast::<C>()
     }
 }
 

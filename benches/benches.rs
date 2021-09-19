@@ -114,8 +114,8 @@ fn insert_remove(bencher: &mut Bencher) {
         world.remove::<(Pos,)>(ent);
         world.remove::<(Vel,)>(ent);
 
-        world.insert(ent, (Vel(0.0),));
         world.insert(ent, (Pos(0.0),));
+        world.insert(ent, (Vel(0.0),));
     });
 }
 

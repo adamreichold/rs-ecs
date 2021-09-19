@@ -281,7 +281,6 @@ where
             unsafe { transmute(&mut *self.ptrs) };
 
         ptrs.clear();
-
         ptrs.resize(self.world.archetypes.len(), None);
 
         for (idx, ty) in types {
@@ -375,7 +374,7 @@ where
     ptrs: &'q [Option<<S::Fetch as Fetch<'q>>::Ptr>],
 }
 
-impl<'q, S> QueryMap<'q, S>
+impl<S> QueryMap<'_, S>
 where
     S: QuerySpec,
 {

@@ -114,25 +114,19 @@ impl Archetype {
             .0
             .sort_unstable_by_key(|ty| Reverse(ty.layout.align()));
 
-        let mut max_align = 1;
-        let mut sum_size = 0;
         let mut new_offsets = Vec::<usize>::with_capacity(types.0.len());
+        let mut new_size = 0;
 
         for ty in types.0.iter() {
-            let size = ty.layout.size();
-            let align = ty.layout.align();
+            new_offsets.push(new_size);
 
-            max_align = max_align.max(align);
-
-            debug_assert!(sum_size % align == 0);
-            new_offsets.push(sum_size);
-
-            sum_size = sum_size
-                .checked_add(size.checked_mul(new_cap).unwrap())
+            new_size = new_size
+                .checked_add(ty.layout.size().checked_mul(new_cap).unwrap())
                 .unwrap();
         }
 
-        let new_layout = Layout::from_size_align(sum_size, max_align).unwrap();
+        let new_layout = Layout::from_size_align(new_size, self.layout.align()).unwrap();
+
         let new_ptr = if new_layout.size() != 0 {
             unsafe { alloc(new_layout) }
         } else {

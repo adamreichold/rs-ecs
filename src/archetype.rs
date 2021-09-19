@@ -3,7 +3,7 @@ use std::any::{type_name, TypeId};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Reverse;
 use std::ops::{Deref, DerefMut};
-use std::ptr::copy_nonoverlapping;
+use std::ptr::{copy_nonoverlapping, null_mut};
 
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
@@ -25,7 +25,7 @@ impl Archetype {
             .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
-        let ptr = max_align as *mut u8;
+        let ptr = null_mut();
 
         Self {
             types: types.0.into(),
@@ -56,7 +56,7 @@ impl Archetype {
     pub unsafe fn free(&mut self, idx: u32, drop: bool) -> bool {
         if drop {
             for ty in &*self.types {
-                let ptr = self.ptr.add(ty.offset + ty.layout.size() * idx as usize);
+                let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 
                 (ty.drop)(ptr);
             }
@@ -68,8 +68,8 @@ impl Archetype {
             for ty in &*self.types {
                 let size = ty.layout.size();
 
-                let src_ptr = self.ptr.add(ty.offset + size * self.len as usize);
-                let dst_ptr = self.ptr.add(ty.offset + size * idx as usize);
+                let src_ptr = ty.base_pointer.add(size * self.len as usize);
+                let dst_ptr = ty.base_pointer.add(size * idx as usize);
 
                 copy_nonoverlapping(src_ptr, dst_ptr, size);
             }
@@ -86,10 +86,8 @@ impl Archetype {
 
         for ty in &*self.types {
             unsafe {
-                let ptr = self.ptr.add(ty.offset);
-
                 for idx in 0..len {
-                    let ptr = ptr.add(ty.layout.size() * idx as usize);
+                    let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 
                     (ty.drop)(ptr);
                 }
@@ -148,7 +146,7 @@ impl Archetype {
             unsafe {
                 for (ty, new_offset) in types.0.iter().zip(&new_offsets) {
                     copy_nonoverlapping(
-                        self.ptr.add(ty.offset),
+                        ty.base_pointer,
                         new_ptr.add(*new_offset),
                         ty.layout.size() * self.cap as usize,
                     );
@@ -162,7 +160,7 @@ impl Archetype {
         self.ptr = new_ptr;
 
         for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
-            ty.offset = *new_offset;
+            ty.base_pointer = unsafe { new_ptr.add(*new_offset) };
         }
 
         self.cap = new_cap as u32;
@@ -234,8 +232,8 @@ impl Archetype {
 
             let size = src_ty.layout.size();
 
-            let src_ptr = src.ptr.add(src_ty.offset + size * src_idx as usize);
-            let dst_ptr = dst.ptr.add(dst_ty.offset + size * dst_idx as usize);
+            let src_ptr = src_ty.base_pointer.add(size * src_idx as usize);
+            let dst_ptr = dst_ty.base_pointer.add(size * dst_idx as usize);
 
             copy_nonoverlapping(src_ptr, dst_ptr, size);
         }
@@ -281,7 +279,7 @@ impl Archetype {
     {
         let ty = self.type_metadata::<C>(ty);
 
-        self.ptr.add(ty.offset).cast::<C>()
+        ty.base_pointer.cast::<C>()
     }
 }
 
@@ -355,7 +353,7 @@ struct TypeMetadata {
     id: TypeId,
     layout: Layout,
     drop: unsafe fn(*mut u8),
-    offset: usize,
+    base_pointer: *mut u8,
     borrow: RefCell<()>,
 }
 
@@ -365,7 +363,7 @@ impl Clone for TypeMetadata {
             id: self.id,
             layout: self.layout,
             drop: self.drop,
-            offset: 0,
+            base_pointer: null_mut(),
             borrow: Default::default(),
         }
     }
@@ -384,7 +382,7 @@ impl TypeMetadata {
             id: TypeId::of::<C>(),
             layout: Layout::new::<C>(),
             drop: drop_in_place::<C>,
-            offset: 0,
+            base_pointer: null_mut(),
             borrow: Default::default(),
         }
     }
@@ -445,16 +443,22 @@ mod tests {
 
         assert_eq!(archetype.types.len(), 4);
 
-        let ty = archetype.find::<u64>().unwrap();
-        assert_eq!(archetype.types[ty as usize].offset, 0);
+        unsafe {
+            let ty = archetype.find::<u64>().unwrap();
+            let base_pointer = archetype.base_pointer::<u64>(ty);
+            assert_eq!(base_pointer, archetype.ptr.add(0).cast());
 
-        let ty = archetype.find::<u32>().unwrap();
-        assert_eq!(archetype.types[ty as usize].offset, 8 * 8);
+            let ty = archetype.find::<u32>().unwrap();
+            let base_pointer = archetype.base_pointer::<u32>(ty);
+            assert_eq!(base_pointer, archetype.ptr.add(8 * 8).cast());
 
-        let ty = archetype.find::<u16>().unwrap();
-        assert_eq!(archetype.types[ty as usize].offset, 8 * (8 + 4));
+            let ty = archetype.find::<u16>().unwrap();
+            let base_pointer = archetype.base_pointer::<u16>(ty);
+            assert_eq!(base_pointer, archetype.ptr.add(8 * (8 + 4)).cast());
 
-        let ty = archetype.find::<u8>().unwrap();
-        assert_eq!(archetype.types[ty as usize].offset, 8 * (8 + 4 + 2));
+            let ty = archetype.find::<u8>().unwrap();
+            let base_pointer = archetype.base_pointer::<u8>(ty);
+            assert_eq!(base_pointer, archetype.ptr.add(8 * (8 + 4 + 2)).cast());
+        }
     }
 }

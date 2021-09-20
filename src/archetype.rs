@@ -2,8 +2,9 @@ use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, TypeId};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Reverse;
+use std::mem::align_of;
 use std::ops::{Deref, DerefMut};
-use std::ptr::{copy_nonoverlapping, null_mut};
+use std::ptr::copy_nonoverlapping;
 
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
@@ -25,7 +26,7 @@ impl Archetype {
             .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
-        let ptr = null_mut();
+        let ptr = max_align as *mut u8;
 
         Self {
             types: types.0.into(),
@@ -136,26 +137,26 @@ impl Archetype {
             handle_alloc_error(new_layout);
         }
 
-        if self.layout.size() != 0 {
-            unsafe {
-                for (ty, new_offset) in types.0.iter().zip(&new_offsets) {
-                    copy_nonoverlapping(
-                        ty.base_pointer,
-                        new_ptr.add(*new_offset),
-                        ty.layout.size() * self.cap as usize,
-                    );
-                }
+        unsafe {
+            for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
+                let new_base_pointer = new_ptr.add(*new_offset);
 
+                copy_nonoverlapping(
+                    ty.base_pointer,
+                    new_base_pointer,
+                    ty.layout.size() * self.cap as usize,
+                );
+
+                ty.base_pointer = new_base_pointer;
+            }
+
+            if self.layout.size() != 0 {
                 dealloc(self.ptr, self.layout);
             }
         }
 
         self.layout = new_layout;
         self.ptr = new_ptr;
-
-        for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
-            ty.base_pointer = unsafe { new_ptr.add(*new_offset) };
-        }
 
         self.cap = new_cap as u32;
     }
@@ -165,8 +166,8 @@ impl Drop for Archetype {
     fn drop(&mut self) {
         self.clear();
 
-        if self.layout.size() != 0 {
-            unsafe {
+        unsafe {
+            if self.layout.size() != 0 {
                 dealloc(self.ptr, self.layout);
             }
         }
@@ -357,7 +358,7 @@ impl Clone for TypeMetadata {
             id: self.id,
             layout: self.layout,
             drop: self.drop,
-            base_pointer: null_mut(),
+            base_pointer: self.layout.align() as *mut u8,
             borrow: Default::default(),
         }
     }
@@ -376,7 +377,7 @@ impl TypeMetadata {
             id: TypeId::of::<C>(),
             layout: Layout::new::<C>(),
             drop: drop_in_place::<C>,
-            base_pointer: null_mut(),
+            base_pointer: align_of::<C>() as *mut u8,
             borrow: Default::default(),
         }
     }

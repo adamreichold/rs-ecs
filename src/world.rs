@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
-use std::ops::BitXor;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
@@ -626,9 +625,7 @@ struct U32PairHasher(u64);
 
 impl Hasher for U32PairHasher {
     fn write_u32(&mut self, val: u32) {
-        const K: u64 = 0x517cc1b727220a95;
-
-        self.0 = self.0.rotate_left(5).bitxor(val as u64).wrapping_mul(K);
+        self.0 = self.0 << 32 | val as u64;
     }
 
     fn write(&mut self, _val: &[u8]) {
@@ -636,7 +633,7 @@ impl Hasher for U32PairHasher {
     }
 
     fn finish(&self) -> u64 {
-        self.0
+        self.0.wrapping_mul(0x517cc1b727220a95)
     }
 }
 
@@ -941,5 +938,25 @@ mod tests {
 
         let comp = world2.get::<i32>(ent2).unwrap();
         assert_eq!(*comp, 23);
+    }
+
+    #[test]
+    fn u32_pair_hasher_yields_uniformly_distributed_lower_bits() {
+        let mut histogram = [0; 128];
+
+        for i in 0..1024 {
+            for j in 0..128 {
+                let mut hasher = U32PairHasher::default();
+                hasher.write_u32(i);
+                hasher.write_u32(j);
+                let hash = hasher.finish();
+
+                histogram[hash as usize % histogram.len()] += 1;
+            }
+        }
+
+        for count in histogram {
+            assert_eq!(count, 1024 * 128 / histogram.len());
+        }
     }
 }

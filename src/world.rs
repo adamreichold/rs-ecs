@@ -14,9 +14,9 @@ pub struct World {
     pub(crate) entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
     pub(crate) archetypes: Vec<Archetype>,
-    insert_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
-    remove_map: HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>,
-    transfer_map: HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>,
+    insert_map: IndexTypeIdMap,
+    remove_map: IndexTypeIdMap,
+    transfer_map: U32PairMap,
 }
 
 impl Default for World {
@@ -174,19 +174,16 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let new_ty;
-
-        if let Some(ty) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
-            new_ty = *ty;
+        let new_ty = if let Some(ty) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
+            *ty
         } else {
-            let mut types = self.archetypes[meta.ty as usize].types();
-            B::insert(&mut types);
-
-            new_ty = Self::get_or_insert(&mut self.archetypes, types);
-
-            self.insert_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
-            self.remove_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
-        }
+            Self::insert_cold::<B>(
+                &mut self.archetypes,
+                &mut self.insert_map,
+                &mut self.remove_map,
+                meta.ty,
+            )
+        };
 
         let old_ty = meta.ty;
         let old_idx = meta.idx;
@@ -196,6 +193,28 @@ impl World {
 
             comps.write(&mut self.archetypes[new_ty as usize], new_idx);
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn insert_cold<B>(
+        archetypes: &mut Vec<Archetype>,
+        insert_map: &mut IndexTypeIdMap,
+        remove_map: &mut IndexTypeIdMap,
+        old_ty: u32,
+    ) -> u32
+    where
+        B: Bundle,
+    {
+        let mut types = archetypes[old_ty as usize].types();
+        B::insert(&mut types);
+
+        let new_ty = Self::get_or_insert(archetypes, types);
+
+        insert_map.insert((old_ty, TypeId::of::<B>()), new_ty);
+        remove_map.insert((new_ty, TypeId::of::<B>()), old_ty);
+
+        new_ty
     }
 
     /// Remove components for a given [Entity].
@@ -219,19 +238,16 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let new_ty;
-
-        if let Some(ty) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
-            new_ty = *ty;
+        let new_ty = if let Some(ty) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
+            *ty
         } else {
-            let mut types = self.archetypes[meta.ty as usize].types();
-            B::remove(&mut types)?;
-
-            new_ty = Self::get_or_insert(&mut self.archetypes, types);
-
-            self.remove_map.insert((meta.ty, TypeId::of::<B>()), new_ty);
-            self.insert_map.insert((new_ty, TypeId::of::<B>()), meta.ty);
-        }
+            Self::remove_cold::<B>(
+                &mut self.archetypes,
+                &mut self.insert_map,
+                &mut self.remove_map,
+                meta.ty,
+            )?
+        };
 
         let old_ty = meta.ty;
         let old_idx = meta.idx;
@@ -243,6 +259,28 @@ impl World {
 
             Some(comps)
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn remove_cold<B>(
+        archetypes: &mut Vec<Archetype>,
+        insert_map: &mut IndexTypeIdMap,
+        remove_map: &mut IndexTypeIdMap,
+        old_ty: u32,
+    ) -> Option<u32>
+    where
+        B: Bundle,
+    {
+        let mut types = archetypes[old_ty as usize].types();
+        B::remove(&mut types)?;
+
+        let new_ty = Self::get_or_insert(archetypes, types);
+
+        remove_map.insert((old_ty, TypeId::of::<B>()), new_ty);
+        insert_map.insert((new_ty, TypeId::of::<B>()), old_ty);
+
+        Some(new_ty)
     }
 
     fn get_or_insert(archetypes: &mut Vec<Archetype>, types: TypeMetadataSet) -> u32 {
@@ -313,16 +351,19 @@ impl World {
         self.free_list.push(ent.id);
 
         // get or insert new archetype in other
-        if let Some(ty) = self.transfer_map.get(&(meta.ty, other.tag)) {
-            new_meta.ty = *ty;
+        new_meta.ty = if let Some(ty) = self.transfer_map.get(&(meta.ty, other.tag)) {
+            *ty
         } else {
-            let types = self.archetypes[meta.ty as usize].types();
-
-            new_meta.ty = Self::get_or_insert(&mut other.archetypes, types);
-
-            self.transfer_map.insert((meta.ty, other.tag), new_meta.ty);
-            other.transfer_map.insert((new_meta.ty, self.tag), meta.ty);
-        }
+            Self::transfer_cold(
+                &self.archetypes,
+                &mut other.archetypes,
+                &mut self.transfer_map,
+                &mut other.transfer_map,
+                self.tag,
+                other.tag,
+                meta.ty,
+            )
+        };
 
         // move components from old to new archetype
         let old_archetype = &mut self.archetypes[meta.ty as usize];
@@ -349,6 +390,27 @@ impl World {
         }
 
         ent
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn transfer_cold(
+        archetypes: &[Archetype],
+        other_archetypes: &mut Vec<Archetype>,
+        transfer_map: &mut U32PairMap,
+        other_transfer_map: &mut U32PairMap,
+        tag: u32,
+        other_tag: u32,
+        old_ty: u32,
+    ) -> u32 {
+        let types = archetypes[old_ty as usize].types();
+
+        let new_ty = Self::get_or_insert(other_archetypes, types);
+
+        transfer_map.insert((old_ty, other_tag), new_ty);
+        other_transfer_map.insert((new_ty, tag), old_ty);
+
+        new_ty
     }
 }
 
@@ -534,6 +596,8 @@ macro_rules! impl_bundle_for_tuples {
 
 impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 
+type IndexTypeIdMap = HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>;
+
 #[derive(Default)]
 struct IndexTypeIdHasher(u64);
 
@@ -554,6 +618,8 @@ impl Hasher for IndexTypeIdHasher {
         self.0
     }
 }
+
+type U32PairMap = HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>;
 
 #[derive(Default)]
 struct U32PairHasher(u64);

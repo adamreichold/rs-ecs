@@ -13,9 +13,9 @@ pub struct World {
     pub(crate) entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
     pub(crate) archetypes: Vec<Archetype>,
-    insert_map: IndexTypeIdMap,
-    remove_map: IndexTypeIdMap,
-    transfer_map: U32PairMap,
+    insert_map: IndexTypeIdMap<u32>,
+    remove_map: IndexTypeIdMap<u32>,
+    transfer_map: IndexTagMap<u32>,
 }
 
 impl Default for World {
@@ -198,8 +198,8 @@ impl World {
     #[inline(never)]
     fn insert_cold<B>(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap,
-        remove_map: &mut IndexTypeIdMap,
+        insert_map: &mut IndexTypeIdMap<u32>,
+        remove_map: &mut IndexTypeIdMap<u32>,
         old_ty: u32,
     ) -> u32
     where
@@ -264,8 +264,8 @@ impl World {
     #[inline(never)]
     fn remove_cold<B>(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap,
-        remove_map: &mut IndexTypeIdMap,
+        insert_map: &mut IndexTypeIdMap<u32>,
+        remove_map: &mut IndexTypeIdMap<u32>,
         old_ty: u32,
     ) -> Option<u32>
     where
@@ -396,8 +396,8 @@ impl World {
     fn transfer_cold(
         archetypes: &[Archetype],
         other_archetypes: &mut Vec<Archetype>,
-        transfer_map: &mut U32PairMap,
-        other_transfer_map: &mut U32PairMap,
+        transfer_map: &mut IndexTagMap<u32>,
+        other_transfer_map: &mut IndexTagMap<u32>,
         tag: u32,
         other_tag: u32,
         old_ty: u32,
@@ -595,7 +595,7 @@ macro_rules! impl_bundle_for_tuples {
 
 impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 
-type IndexTypeIdMap = HashMap<(u32, TypeId), u32, BuildHasherDefault<IndexTypeIdHasher>>;
+type IndexTypeIdMap<V> = HashMap<(u32, TypeId), V, BuildHasherDefault<IndexTypeIdHasher>>;
 
 #[derive(Default)]
 struct IndexTypeIdHasher(u64);
@@ -618,12 +618,12 @@ impl Hasher for IndexTypeIdHasher {
     }
 }
 
-type U32PairMap = HashMap<(u32, u32), u32, BuildHasherDefault<U32PairHasher>>;
+type IndexTagMap<V> = HashMap<(u32, u32), V, BuildHasherDefault<IndexTagHasher>>;
 
 #[derive(Default)]
-struct U32PairHasher(u64);
+struct IndexTagHasher(u64);
 
-impl Hasher for U32PairHasher {
+impl Hasher for IndexTagHasher {
     fn write_u32(&mut self, val: u32) {
         self.0 = self.0 << 32 | val as u64;
     }
@@ -941,12 +941,12 @@ mod tests {
     }
 
     #[test]
-    fn u32_pair_hasher_yields_uniformly_distributed_lower_bits() {
+    fn index_tag_hasher_yields_uniformly_distributed_lower_bits() {
         let mut histogram = [0; 128];
 
         for i in 0..1024 {
             for j in 0..128 {
-                let mut hasher = U32PairHasher::default();
+                let mut hasher = IndexTagHasher::default();
                 hasher.write_u32(i);
                 hasher.write_u32(j);
                 let hash = hasher.finish();

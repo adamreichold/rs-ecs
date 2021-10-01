@@ -27,7 +27,7 @@ use std::ops::{Deref, DerefMut};
 /// let mut u32_res = resources.get_mut::<u32>();
 /// *u32_res += 1;
 /// ```
-pub struct Resources(HashMap<TypeId, RefCell<Box<dyn Any>>, BuildHasherDefault<TypeIdHasher>>);
+pub struct Resources(TypeIdMap<RefCell<Box<dyn Any>>>);
 
 impl Default for Resources {
     /// Create an empty resources map.
@@ -131,6 +131,8 @@ impl<R> DerefMut for ResMut<'_, R> {
         self.0.deref_mut()
     }
 }
+
+type TypeIdMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
 
 #[derive(Default)]
 struct TypeIdHasher(u64);

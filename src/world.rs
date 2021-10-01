@@ -500,9 +500,11 @@ impl World {
     where
         C: 'static,
     {
-        if TypeId::of::<C>() == TypeId::of::<Entity>() {
-            panic!("Entity cannot be accessed mutably");
-        }
+        assert_ne!(
+            TypeId::of::<C>(),
+            TypeId::of::<Entity>(),
+            "Entity cannot be accessed mutably"
+        );
 
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
@@ -568,9 +570,11 @@ macro_rules! impl_bundle_for_tuples {
 
             fn remove(types: &mut TypeMetadataSet) -> Option<()> {
                 $(
-                    if TypeId::of::<$types>() == TypeId::of::<Entity>() {
-                        panic!("Entity cannot be removed");
-                    }
+                    assert_ne!(
+                        TypeId::of::<$types>(),
+                        TypeId::of::<Entity>(),
+                        "Entity cannot be removed"
+                    );
 
                     types.remove::<$types>()?;
                 )+

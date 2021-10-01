@@ -471,9 +471,11 @@ where
     type Item = &'q mut C;
 
     fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        if TypeId::of::<C>() == TypeId::of::<Entity>() {
-            panic!("Entity cannot be queried mutably");
-        }
+        assert_ne!(
+            TypeId::of::<C>(),
+            TypeId::of::<Entity>(),
+            "Entity cannot be queried mutably"
+        );
 
         archetype.find::<C>()
     }

@@ -58,6 +58,11 @@ impl Resources {
             Entry::Occupied(_) => panic!("Resource {} already present", type_name::<R>()),
         };
     }
+
+    /// Drop all resources.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 impl Resources {

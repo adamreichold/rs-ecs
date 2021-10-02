@@ -13,9 +13,9 @@ pub struct World {
     pub(crate) entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
     pub(crate) archetypes: Vec<Archetype>,
-    insert_map: IndexTypeIdMap<u32>,
-    remove_map: IndexTypeIdMap<u32>,
-    transfer_map: IndexTagMap<u32>,
+    insert_map: IndexTypeIdMap<u16>,
+    remove_map: IndexTypeIdMap<u16>,
+    transfer_map: IndexTagMap<u16>,
 }
 
 impl Default for World {
@@ -145,9 +145,9 @@ impl World {
 }
 
 impl World {
-    pub(crate) fn tag_gen(&self) -> (u32, u32) {
+    pub(crate) fn tag_gen(&self) -> (u32, u16) {
         debug_assert!(!self.archetypes.is_empty());
-        (self.tag, self.archetypes.len() as u32)
+        (self.tag, self.archetypes.len() as u16)
     }
 
     /// Insert components for a given [Entity].
@@ -200,12 +200,12 @@ impl World {
     #[inline(never)]
     fn insert_cold(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap<u32>,
-        remove_map: &mut IndexTypeIdMap<u32>,
+        insert_map: &mut IndexTypeIdMap<u16>,
+        remove_map: &mut IndexTypeIdMap<u16>,
         type_id: TypeId,
         insert: fn(&mut TypeMetadataSet),
-        old_ty: u32,
-    ) -> u32 {
+        old_ty: u16,
+    ) -> u16 {
         let mut types = archetypes[old_ty as usize].types();
         insert(&mut types);
 
@@ -267,12 +267,12 @@ impl World {
     #[inline(never)]
     fn remove_cold(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap<u32>,
-        remove_map: &mut IndexTypeIdMap<u32>,
+        insert_map: &mut IndexTypeIdMap<u16>,
+        remove_map: &mut IndexTypeIdMap<u16>,
         type_id: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
-        old_ty: u32,
-    ) -> Option<u32> {
+        old_ty: u16,
+    ) -> Option<u16> {
         let mut types = archetypes[old_ty as usize].types();
         remove(&mut types)?;
 
@@ -284,24 +284,24 @@ impl World {
         Some(new_ty)
     }
 
-    fn get_or_insert(archetypes: &mut Vec<Archetype>, types: TypeMetadataSet) -> u32 {
+    fn get_or_insert(archetypes: &mut Vec<Archetype>, types: TypeMetadataSet) -> u16 {
         let pos = archetypes
             .iter_mut()
             .position(|archetype| archetype.match_(&types));
 
         if let Some(pos) = pos {
-            pos as u32
+            pos as u16
         } else {
             let len = archetypes.len();
-            assert!(len < u32::MAX as usize);
+            assert!(len < u16::MAX as usize);
 
             archetypes.push(Archetype::new(types));
 
-            len as u32
+            len as u16
         }
     }
 
-    unsafe fn move_(&mut self, id: u32, old_ty: u32, new_ty: u32, old_idx: u32) -> u32 {
+    unsafe fn move_(&mut self, id: u32, old_ty: u16, new_ty: u16, old_idx: u32) -> u32 {
         let old_archetype = &mut *self.archetypes.as_mut_ptr().add(old_ty as usize);
         let new_archetype = &mut *self.archetypes.as_mut_ptr().add(new_ty as usize);
 
@@ -398,12 +398,12 @@ impl World {
     fn transfer_cold(
         archetypes: &[Archetype],
         other_archetypes: &mut Vec<Archetype>,
-        transfer_map: &mut IndexTagMap<u32>,
-        other_transfer_map: &mut IndexTagMap<u32>,
+        transfer_map: &mut IndexTagMap<u16>,
+        other_transfer_map: &mut IndexTagMap<u16>,
         tag: u32,
         other_tag: u32,
-        old_ty: u32,
-    ) -> u32 {
+        old_ty: u16,
+    ) -> u16 {
         let types = archetypes[old_ty as usize].types();
 
         let new_ty = Self::get_or_insert(other_archetypes, types);
@@ -525,7 +525,7 @@ pub struct Entity {
 #[derive(Clone, Copy)]
 pub struct EntityMetadata {
     pub gen: NonZeroU32,
-    pub ty: u32,
+    pub ty: u16,
     pub idx: u32,
 }
 
@@ -601,13 +601,13 @@ macro_rules! impl_bundle_for_tuples {
 
 impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
 
-type IndexTypeIdMap<V> = HashMap<(u32, TypeId), V, BuildHasherDefault<IndexTypeIdHasher>>;
+type IndexTypeIdMap<V> = HashMap<(u16, TypeId), V, BuildHasherDefault<IndexTypeIdHasher>>;
 
 #[derive(Default)]
 struct IndexTypeIdHasher(u64);
 
 impl Hasher for IndexTypeIdHasher {
-    fn write_u32(&mut self, val: u32) {
+    fn write_u16(&mut self, val: u16) {
         self.0 = 1 + val as u64;
     }
 
@@ -624,12 +624,16 @@ impl Hasher for IndexTypeIdHasher {
     }
 }
 
-type IndexTagMap<V> = HashMap<(u32, u32), V, BuildHasherDefault<IndexTagHasher>>;
+type IndexTagMap<V> = HashMap<(u16, u32), V, BuildHasherDefault<IndexTagHasher>>;
 
 #[derive(Default)]
 struct IndexTagHasher(u64);
 
 impl Hasher for IndexTagHasher {
+    fn write_u16(&mut self, val: u16) {
+        self.0 = val as u64;
+    }
+
     fn write_u32(&mut self, val: u32) {
         self.0 = self.0 << 32 | val as u64;
     }

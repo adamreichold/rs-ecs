@@ -92,8 +92,8 @@ pub struct Query<S>
 where
     S: QuerySpec,
 {
-    tag_gen: (u32, u32),
-    types: Vec<(u32, <S::Fetch as Fetch<'static>>::Ty)>,
+    tag_gen: (u32, u16),
+    types: Vec<(u16, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
     ptrs: Vec<Option<<S::Fetch as Fetch<'static>>::Ptr>>,
 }
@@ -154,7 +154,7 @@ where
 
         self.refs.clear();
 
-        let types: &'w [(u32, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
+        let types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
         let ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>> =
             unsafe { transmute(&mut self.ptrs) };
@@ -182,7 +182,7 @@ where
 
         for (idx, archetype) in world.archetypes.iter().enumerate() {
             if let Some(ty) = S::Fetch::find(archetype) {
-                self.types.push((idx as u32, ty));
+                self.types.push((idx as u16, ty));
             }
         }
 
@@ -231,7 +231,7 @@ where
     S: QuerySpec,
 {
     world: &'w World,
-    types: &'w [(u32, <S::Fetch as Fetch<'w>>::Ty)],
+    types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
     ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>>,
 }
@@ -242,7 +242,7 @@ where
 {
     /// Create an iterator over the entities matching the query.
     pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
-        let types: &'q [(u32, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
 
         QueryIter {
             types: types.iter(),
@@ -276,7 +276,7 @@ where
     /// assert_eq!(*f, 1.0);
     /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
-        let types: &'q [(u32, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
         let ptrs: &'q mut Vec<Option<<S::Fetch as Fetch<'q>>::Ptr>> =
             unsafe { transmute(&mut *self.ptrs) };
 
@@ -312,7 +312,7 @@ pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
 {
-    types: Iter<'q, (u32, <S::Fetch as Fetch<'q>>::Ty)>,
+    types: Iter<'q, (u16, <S::Fetch as Fetch<'q>>::Ty)>,
     archetypes: &'q [Archetype],
     idx: u32,
     len: u32,

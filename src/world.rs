@@ -176,10 +176,12 @@ impl World {
         let new_ty = if let Some(ty) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
             *ty
         } else {
-            Self::insert_cold::<B>(
+            Self::insert_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
                 &mut self.remove_map,
+                TypeId::of::<B>(),
+                B::insert,
                 meta.ty,
             )
         };
@@ -196,22 +198,21 @@ impl World {
 
     #[cold]
     #[inline(never)]
-    fn insert_cold<B>(
+    fn insert_cold(
         archetypes: &mut Vec<Archetype>,
         insert_map: &mut IndexTypeIdMap<u32>,
         remove_map: &mut IndexTypeIdMap<u32>,
+        type_id: TypeId,
+        insert: fn(&mut TypeMetadataSet),
         old_ty: u32,
-    ) -> u32
-    where
-        B: Bundle,
-    {
+    ) -> u32 {
         let mut types = archetypes[old_ty as usize].types();
-        B::insert(&mut types);
+        insert(&mut types);
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        insert_map.insert((old_ty, TypeId::of::<B>()), new_ty);
-        remove_map.insert((new_ty, TypeId::of::<B>()), old_ty);
+        insert_map.insert((old_ty, type_id), new_ty);
+        remove_map.insert((new_ty, type_id), old_ty);
 
         new_ty
     }
@@ -240,10 +241,12 @@ impl World {
         let new_ty = if let Some(ty) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
             *ty
         } else {
-            Self::remove_cold::<B>(
+            Self::remove_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
                 &mut self.remove_map,
+                TypeId::of::<B>(),
+                B::remove,
                 meta.ty,
             )?
         };
@@ -262,22 +265,21 @@ impl World {
 
     #[cold]
     #[inline(never)]
-    fn remove_cold<B>(
+    fn remove_cold(
         archetypes: &mut Vec<Archetype>,
         insert_map: &mut IndexTypeIdMap<u32>,
         remove_map: &mut IndexTypeIdMap<u32>,
+        type_id: TypeId,
+        remove: fn(&mut TypeMetadataSet) -> Option<()>,
         old_ty: u32,
-    ) -> Option<u32>
-    where
-        B: Bundle,
-    {
+    ) -> Option<u32> {
         let mut types = archetypes[old_ty as usize].types();
-        B::remove(&mut types)?;
+        remove(&mut types)?;
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        remove_map.insert((old_ty, TypeId::of::<B>()), new_ty);
-        insert_map.insert((new_ty, TypeId::of::<B>()), old_ty);
+        remove_map.insert((old_ty, type_id), new_ty);
+        insert_map.insert((new_ty, type_id), old_ty);
 
         Some(new_ty)
     }

@@ -55,8 +55,8 @@ impl Archetype {
     }
 
     #[must_use]
-    pub unsafe fn free(&mut self, idx: u32, drop: bool) -> bool {
-        if drop {
+    pub unsafe fn free<const DROP: bool>(&mut self, idx: u32) -> bool {
+        if DROP {
             for ty in &*self.types {
                 let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 

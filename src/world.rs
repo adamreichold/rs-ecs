@@ -113,19 +113,22 @@ impl World {
 
         meta.bump_gen();
 
-        Self::free_idx(
+        Self::free_idx::<true>(
             &mut self.archetypes[meta.ty as usize],
             meta.idx,
-            true,
             &mut self.entities,
         );
 
         self.free_list.push(ent.id);
     }
 
-    fn free_idx(archetype: &mut Archetype, idx: u32, drop: bool, entities: &mut [EntityMetadata]) {
+    fn free_idx<const DROP: bool>(
+        archetype: &mut Archetype,
+        idx: u32,
+        entities: &mut [EntityMetadata],
+    ) {
         unsafe {
-            if archetype.free(idx, drop) {
+            if archetype.free::<DROP>(idx) {
                 let swapped_ent = archetype.pointer::<Entity>(idx).read();
 
                 entities[swapped_ent.id as usize].idx = idx;
@@ -309,7 +312,7 @@ impl World {
 
         Archetype::move_(old_archetype, new_archetype, old_idx, new_idx);
 
-        Self::free_idx(old_archetype, old_idx, false, &mut self.entities);
+        Self::free_idx::<false>(old_archetype, old_idx, &mut self.entities);
 
         let meta = &mut self.entities[id as usize];
         meta.ty = new_ty;
@@ -375,7 +378,7 @@ impl World {
 
             Archetype::move_(old_archetype, new_archetype, meta.idx, new_meta.idx);
 
-            Self::free_idx(old_archetype, meta.idx, false, &mut self.entities);
+            Self::free_idx::<false>(old_archetype, meta.idx, &mut self.entities);
         }
 
         // fix entity component in other

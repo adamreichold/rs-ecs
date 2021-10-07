@@ -4,7 +4,8 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::Reverse;
 use std::mem::align_of;
 use std::ops::{Deref, DerefMut};
-use std::ptr::copy_nonoverlapping;
+use std::ptr::{copy_nonoverlapping, drop_in_place};
+use std::slice::from_raw_parts_mut;
 
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
@@ -59,7 +60,7 @@ impl Archetype {
             for ty in &*self.types {
                 let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 
-                (ty.drop)(ptr);
+                (ty.drop)(ptr, 1);
             }
         }
 
@@ -87,11 +88,7 @@ impl Archetype {
 
         for ty in &*self.types {
             unsafe {
-                for idx in 0..len {
-                    let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
-
-                    (ty.drop)(ptr);
-                }
+                (ty.drop)(ty.base_pointer, len as usize);
             }
         }
     }
@@ -347,7 +344,7 @@ impl<C> DerefMut for CompMut<'_, C> {
 struct TypeMetadata {
     id: TypeId,
     layout: Layout,
-    drop: unsafe fn(*mut u8),
+    drop: unsafe fn(*mut u8, usize),
     base_pointer: *mut u8,
     borrow: RefCell<()>,
 }
@@ -369,14 +366,14 @@ impl TypeMetadata {
     where
         C: 'static,
     {
-        unsafe fn drop_in_place<C>(ptr: *mut u8) {
-            ptr.cast::<C>().drop_in_place()
+        unsafe fn drop<C>(ptr: *mut u8, len: usize) {
+            drop_in_place(from_raw_parts_mut(ptr.cast::<C>(), len))
         }
 
         Self {
             id: TypeId::of::<C>(),
             layout: Layout::new::<C>(),
-            drop: drop_in_place::<C>,
+            drop: drop::<C>,
             base_pointer: align_of::<C>() as *mut u8,
             borrow: Default::default(),
         }
@@ -419,6 +416,8 @@ impl TypeMetadataSet {
 mod tests {
     use super::*;
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     #[test]
     fn reverse_sorting_by_alignment_avoids_padding() {
         let mut types = TypeMetadataSet::default();
@@ -455,5 +454,35 @@ mod tests {
             let base_pointer = archetype.base_pointer::<u8>(ty);
             assert_eq!(base_pointer, archetype.ptr.add(8 * (8 + 4 + 2)).cast());
         }
+    }
+
+    #[test]
+    fn drops_all_component_values() {
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        struct CountDrops;
+
+        impl Drop for CountDrops {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut types = TypeMetadataSet::default();
+        types.insert::<CountDrops>();
+
+        let mut archetype = Archetype::new(types);
+
+        unsafe {
+            for _ in 0..32 {
+                let ent = archetype.alloc();
+
+                archetype.pointer::<CountDrops>(ent).write(CountDrops);
+            }
+        }
+
+        drop(archetype);
+
+        assert_eq!(DROPS.load(Ordering::Relaxed), 32);
     }
 }

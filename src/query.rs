@@ -396,6 +396,7 @@ pub trait QuerySpec {
     type Fetch: for<'a> Fetch<'a>;
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe trait Fetch<'q> {
     type Ty: Copy;
     type Ref;

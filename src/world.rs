@@ -548,6 +548,7 @@ impl EntityMetadata {
     }
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub unsafe trait Bundle: 'static {
     fn insert(types: &mut TypeMetadataSet);
     #[must_use]

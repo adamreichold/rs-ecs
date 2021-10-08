@@ -1,4 +1,5 @@
 use std::iter::FusedIterator;
+use std::mem::replace;
 
 use rayon::iter::{
     plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer},
@@ -10,98 +11,50 @@ use crate::{
     query::{Fetch, QuerySpec},
 };
 
-pub struct ArchetypeIterFactory<'q>(&'q [Archetype]);
-
-unsafe impl Send for ArchetypeIterFactory<'_> {}
-
-unsafe impl Sync for ArchetypeIterFactory<'_> {}
-
-impl<'q> ArchetypeIterFactory<'q> {
-    pub fn new(archetypes: &'q [Archetype]) -> Self {
-        Self(archetypes)
-    }
-
-    pub unsafe fn iter<S>(
-        &self,
-        idx: u16,
-        ty: <S::Fetch as Fetch<'q>>::Ty,
-    ) -> impl IndexedParallelIterator<Item = <S::Fetch as Fetch<'q>>::Item> + 'q
-    where
-        S: QuerySpec + 'q,
-        <S::Fetch as Fetch<'q>>::Item: Send,
-    {
-        let archetype = &self.0[idx as usize];
-
-        ArchetypeIter::<'q, S> {
-            idx: 0,
-            len: archetype.len(),
-            ptr: S::Fetch::base_pointer(archetype, ty),
-        }
-    }
-}
-
-struct ArchetypeIter<'q, S>
+/// Used to iterate through the entities which match a certain [Query] in parallel.
+pub struct QueryParIter<'q, S>
 where
     S: QuerySpec,
 {
+    types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+    archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
-    ptr: <S::Fetch as Fetch<'q>>::Ptr,
 }
 
-unsafe impl<S> Send for ArchetypeIter<'_, S> where S: QuerySpec {}
+unsafe impl<'q, S> Send for QueryParIter<'q, S>
+where
+    S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
+{
+}
 
-impl<'q, S> Iterator for ArchetypeIter<'q, S>
+impl<'q, S> QueryParIter<'q, S>
 where
     S: QuerySpec,
 {
-    type Item = <S::Fetch as Fetch<'q>>::Item;
+    pub(crate) fn new(
+        types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+        archetypes: &'q [Archetype],
+    ) -> Self {
+        let len = types
+            .iter()
+            .map(|(idx, _ty)| archetypes[*idx as usize].len())
+            .sum();
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx != self.len {
-            let val = unsafe { S::Fetch::deref(self.ptr, self.idx) };
-            self.idx += 1;
-            Some(val)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
-        (len, Some(len))
-    }
-}
-
-impl<'q, S> DoubleEndedIterator for ArchetypeIter<'q, S>
-where
-    S: QuerySpec,
-{
-    fn next_back(&mut self) -> Option<Self::Item> {
-        if self.idx != self.len {
-            let val = unsafe { S::Fetch::deref(self.ptr, self.len - 1) };
-            self.len -= 1;
-            Some(val)
-        } else {
-            None
+        Self {
+            types,
+            archetypes,
+            idx: 0,
+            len,
         }
     }
 }
 
-impl<S> FusedIterator for ArchetypeIter<'_, S> where S: QuerySpec {}
-
-impl<S> ExactSizeIterator for ArchetypeIter<'_, S>
+impl<'q, S> ParallelIterator for QueryParIter<'q, S>
 where
     S: QuerySpec,
-{
-    fn len(&self) -> usize {
-        (self.len - self.idx) as usize
-    }
-}
-
-impl<'q, S> ParallelIterator for ArchetypeIter<'q, S>
-where
-    S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
     <S::Fetch as Fetch<'q>>::Item: Send,
 {
     type Item = <S::Fetch as Fetch<'q>>::Item;
@@ -114,13 +67,14 @@ where
     }
 
     fn opt_len(&self) -> Option<usize> {
-        Some(ExactSizeIterator::len(self))
+        Some(self.len())
     }
 }
 
-impl<'q, S> IndexedParallelIterator for ArchetypeIter<'q, S>
+impl<'q, S> IndexedParallelIterator for QueryParIter<'q, S>
 where
     S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
     <S::Fetch as Fetch<'q>>::Item: Send,
 {
     fn drive<C>(self, consumer: C) -> C::Result
@@ -131,7 +85,7 @@ where
     }
 
     fn len(&self) -> usize {
-        ExactSizeIterator::len(self)
+        (self.len - self.idx) as usize
     }
 
     fn with_producer<CB>(self, callback: CB) -> CB::Output
@@ -142,39 +96,211 @@ where
     }
 }
 
-impl<'q, S> Producer for ArchetypeIter<'q, S>
+impl<'q, S> Producer for QueryParIter<'q, S>
 where
     S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
     <S::Fetch as Fetch<'q>>::Item: Send,
 {
     type Item = <S::Fetch as Fetch<'q>>::Item;
-    type IntoIter = Self;
+    type IntoIter = QueryParIterIntoIter<'q, S>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self
+        let mut sum = 0;
+
+        let mut first = 0;
+        let mut last = 0;
+
+        let mut idx = 0;
+        let mut len = 0;
+        let mut ptr = S::Fetch::dangling();
+
+        let idx_back = 0;
+        let mut len_back = 0;
+        let mut ptr_back = S::Fetch::dangling();
+
+        for (pos, (archetype_idx, ty)) in self.types.iter().enumerate() {
+            let archetype = &self.archetypes[*archetype_idx as usize];
+
+            if archetype.len() == 0 {
+                continue;
+            }
+
+            sum += archetype.len();
+
+            if self.idx >= sum {
+                continue;
+            }
+
+            if sum - self.idx <= archetype.len() {
+                first = pos + 1;
+
+                idx = archetype.len() - (sum - self.idx);
+                len = archetype.len();
+                ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+
+                if self.len <= sum {
+                    last = first;
+
+                    len -= sum - self.len;
+
+                    break;
+                }
+            }
+
+            if self.len <= sum {
+                last = pos;
+
+                len_back = archetype.len() - (sum - self.len);
+                ptr_back = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+
+                break;
+            }
+        }
+
+        let types = &self.types[first..last];
+
+        QueryParIterIntoIter {
+            types,
+            archetypes: self.archetypes,
+            idx,
+            len,
+            ptr,
+            idx_back,
+            len_back,
+            ptr_back,
+        }
     }
 
     fn split_at(self, mid: usize) -> (Self, Self) {
-        let len = ExactSizeIterator::len(&self);
-        assert!(mid <= len);
-
         let mid = self.idx + mid as u32;
 
-        let left = ArchetypeIter {
+        let lhs = Self {
+            types: self.types,
+            archetypes: self.archetypes,
             idx: self.idx,
             len: mid,
-            ptr: self.ptr,
         };
 
-        let right = ArchetypeIter {
+        let rhs = Self {
+            types: self.types,
+            archetypes: self.archetypes,
             idx: mid,
             len: self.len,
-            ptr: self.ptr,
         };
 
-        (left, right)
+        (lhs, rhs)
     }
 }
+
+pub struct QueryParIterIntoIter<'q, S>
+where
+    S: QuerySpec,
+{
+    types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+    archetypes: &'q [Archetype],
+    idx: u32,
+    len: u32,
+    ptr: <S::Fetch as Fetch<'q>>::Ptr,
+    idx_back: u32,
+    len_back: u32,
+    ptr_back: <S::Fetch as Fetch<'q>>::Ptr,
+}
+
+impl<'q, S> Iterator for QueryParIterIntoIter<'q, S>
+where
+    S: QuerySpec,
+{
+    type Item = <S::Fetch as Fetch<'q>>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.idx != self.len {
+                let val = unsafe { S::Fetch::deref(self.ptr, self.idx) };
+                self.idx += 1;
+                return Some(val);
+            } else {
+                match self.types.split_first() {
+                    Some(((idx, ty), rest)) => {
+                        self.types = rest;
+
+                        let archetype = &self.archetypes[*idx as usize];
+                        self.idx = 0;
+                        self.len = archetype.len();
+                        self.ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+                    }
+                    None => {
+                        if self.idx_back == self.len_back {
+                            return None;
+                        } else {
+                            self.idx = replace(&mut self.idx_back, 0);
+                            self.len = replace(&mut self.len_back, 0);
+                            self.ptr = replace(&mut self.ptr_back, S::Fetch::dangling());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<S> DoubleEndedIterator for QueryParIterIntoIter<'_, S>
+where
+    S: QuerySpec,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.idx_back != self.len_back {
+                let val = unsafe { S::Fetch::deref(self.ptr, self.len_back - 1) };
+                self.len_back -= 1;
+                return Some(val);
+            } else {
+                match self.types.split_last() {
+                    Some(((idx, ty), rest)) => {
+                        self.types = rest;
+
+                        let archetype = &self.archetypes[*idx as usize];
+                        self.idx_back = 0;
+                        self.len_back = archetype.len();
+                        self.ptr_back = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+                    }
+                    None => {
+                        if self.idx == self.len {
+                            return None;
+                        } else {
+                            self.idx_back = replace(&mut self.idx, 0);
+                            self.len_back = replace(&mut self.len, 0);
+                            self.ptr_back = replace(&mut self.ptr, S::Fetch::dangling());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<S> ExactSizeIterator for QueryParIterIntoIter<'_, S>
+where
+    S: QuerySpec,
+{
+    fn len(&self) -> usize {
+        let len = self
+            .types
+            .iter()
+            .map(|(idx, _)| self.archetypes[*idx as usize].len())
+            .sum::<u32>()
+            + self.len
+            - self.idx;
+        len as usize
+    }
+}
+
+impl<S> FusedIterator for QueryParIterIntoIter<'_, S> where S: QuerySpec {}
 
 #[cfg(test)]
 mod tests {

@@ -29,8 +29,6 @@
 
 mod archetype;
 mod query;
-#[cfg(feature = "rayon")]
-mod rayon;
 mod resources;
 mod world;
 
@@ -40,3 +38,9 @@ pub use crate::{
     resources::{Res, ResMut, Resources},
     world::{Entity, World},
 };
+
+#[cfg(feature = "rayon")]
+mod rayon;
+
+#[cfg(feature = "rayon")]
+pub use crate::rayon::QueryParIter;

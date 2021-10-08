@@ -2,7 +2,7 @@ use std::iter::FusedIterator;
 use std::mem::replace;
 
 use rayon::iter::{
-    plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer},
+    plumbing::{bridge, Consumer, Folder, Producer, ProducerCallback, UnindexedConsumer},
     IndexedParallelIterator, ParallelIterator,
 };
 
@@ -170,6 +170,55 @@ where
             len_back,
             ptr_back,
         }
+    }
+
+    fn fold_with<F>(self, mut folder: F) -> F
+    where
+        F: Folder<Self::Item>,
+    {
+        let mut sum = 0;
+
+        for (archetype_idx, ty) in self.types {
+            if self.len <= sum {
+                break;
+            }
+
+            let archetype = &self.archetypes[*archetype_idx as usize];
+
+            if archetype.len() == 0 {
+                continue;
+            }
+
+            sum += archetype.len();
+
+            if self.idx >= sum {
+                continue;
+            }
+
+            let mut idx = 0;
+            let mut len = archetype.len();
+            let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+
+            if sum - self.idx < len {
+                idx = len - (sum - self.idx);
+            }
+
+            if self.len < sum {
+                len -= sum - self.len;
+            }
+
+            while idx != len {
+                let val = unsafe { S::Fetch::deref(ptr, idx) };
+                idx += 1;
+
+                folder = folder.consume(val);
+                if folder.full() {
+                    break;
+                }
+            }
+        }
+
+        folder
     }
 
     fn split_at(self, mid: usize) -> (Self, Self) {

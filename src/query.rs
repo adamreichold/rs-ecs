@@ -240,6 +240,26 @@ impl<S> QueryRef<'_, S>
 where
     S: QuerySpec,
 {
+    /// Visit all entities matching the query.
+    pub fn for_each<'q, F>(&'q mut self, mut f: F)
+    where
+        F: FnMut(<S::Fetch as Fetch<'q>>::Item),
+    {
+        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+
+        for (idx, ty) in types {
+            let archetype = &self.world.archetypes[*idx as usize];
+
+            let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
+
+            for idx in 0..archetype.len() {
+                let val = unsafe { S::Fetch::deref(ptr, idx) };
+
+                f(val);
+            }
+        }
+    }
+
     /// Create an iterator over the entities matching the query.
     pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
         let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
@@ -277,6 +297,7 @@ where
     /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
         let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+
         let ptrs: &'q mut Vec<Option<<S::Fetch as Fetch<'q>>::Ptr>> =
             unsafe { transmute(&mut *self.ptrs) };
 

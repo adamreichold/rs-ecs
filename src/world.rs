@@ -15,6 +15,7 @@ pub struct World {
     pub(crate) archetypes: Vec<Archetype>,
     insert_map: IndexTypeIdMap<u16>,
     remove_map: IndexTypeIdMap<u16>,
+    exchange_map: IndexTypeIdMap<u16>,
     transfer_map: IndexTagMap<u16>,
 }
 
@@ -38,6 +39,7 @@ impl World {
             archetypes: vec![Archetype::new(empty_archetype)],
             insert_map: Default::default(),
             remove_map: Default::default(),
+            exchange_map: Default::default(),
             transfer_map: Default::default(),
         }
     }
@@ -283,6 +285,81 @@ impl World {
 
         remove_map.insert((old_ty, type_id), new_ty);
         insert_map.insert((new_ty, type_id), old_ty);
+
+        Some(new_ty)
+    }
+
+    /// Exchange components for a given [Entity]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity = world.alloc();
+    /// world.insert(entity, (42_u32, true));
+    /// assert!(world.contains::<u32>(entity));
+    /// assert!(world.contains::<bool>(entity));
+    /// assert!(!world.contains::<String>(entity));
+    ///
+    /// world.exchange::<(u32, bool), _>(entity, (String::from("Hello"),)).unwrap();
+    /// assert!(!world.contains::<u32>(entity));
+    /// assert!(!world.contains::<bool>(entity));
+    /// assert!(world.contains::<String>(entity));
+    /// ```
+    pub fn exchange<B1, B2>(&mut self, ent: Entity, new_comps: B2) -> Option<B1>
+    where
+        B1: Bundle,
+        B2: Bundle,
+    {
+        let meta = &self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
+
+        let new_ty = if let Some(ty) = self.exchange_map.get(&(meta.ty, TypeId::of::<(B1, B2)>())) {
+            *ty
+        } else {
+            Self::exchange_cold(
+                &mut self.archetypes,
+                &mut self.exchange_map,
+                TypeId::of::<(B1, B2)>(),
+                B1::remove,
+                B2::insert,
+                meta.ty,
+            )?
+        };
+
+        let old_ty = meta.ty;
+        let old_idx = meta.idx;
+
+        unsafe {
+            let old_comps = B1::read(&mut self.archetypes[old_ty as usize], old_idx);
+
+            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
+
+            new_comps.write(&mut self.archetypes[new_ty as usize], new_idx);
+
+            Some(old_comps)
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn exchange_cold(
+        archetypes: &mut Vec<Archetype>,
+        exchange_map: &mut IndexTypeIdMap<u16>,
+        type_id: TypeId,
+        remove: fn(&mut TypeMetadataSet) -> Option<()>,
+        insert: fn(&mut TypeMetadataSet),
+        old_ty: u16,
+    ) -> Option<u16> {
+        let mut types = archetypes[old_ty as usize].types();
+        remove(&mut types)?;
+        insert(&mut types);
+
+        let new_ty = Self::get_or_insert(archetypes, types);
+
+        exchange_map.insert((old_ty, type_id), new_ty);
 
         Some(new_ty)
     }

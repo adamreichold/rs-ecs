@@ -266,6 +266,39 @@ fn query_map_very_many_small_archetypes(bencher: &mut Bencher) {
     query_map(bencher, spawn_few_in_very_many_small_archetypes);
 }
 
+fn query_for_each(bencher: &mut Bencher, spawn: fn(&mut World)) {
+    let mut world = World::new();
+    let mut query = Query::<(&mut Pos, &Vel)>::new();
+
+    spawn(&mut world);
+
+    let _ = query.borrow(&world).iter();
+
+    bencher.iter(|| {
+        let world = black_box(&world);
+        let query = black_box(&mut query);
+
+        query.borrow(world).for_each(|(pos, vel)| {
+            pos.0 += vel.0;
+        });
+    });
+}
+
+#[bench]
+fn query_for_each_single_archetype(bencher: &mut Bencher) {
+    query_for_each(bencher, spawn_few);
+}
+
+#[bench]
+fn query_for_each_many_archetypes(bencher: &mut Bencher) {
+    query_for_each(bencher, spawn_few_in_many_archetypes);
+}
+
+#[bench]
+fn query_for_each_very_many_small_archetypes(bencher: &mut Bencher) {
+    query_for_each(bencher, spawn_few_in_very_many_small_archetypes);
+}
+
 #[bench]
 fn get_resource(bencher: &mut Bencher) {
     let mut resources = Resources::new();

@@ -123,6 +123,31 @@ fn insert_remove(bencher: &mut Bencher) {
 }
 
 #[bench]
+fn exchange(bencher: &mut Bencher) {
+    let mut world = World::new();
+
+    spawn_few(&mut world);
+
+    let entities = Query::<&Entity>::new()
+        .borrow(&world)
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+
+    let mut entities = entities.iter().cycle();
+
+    bencher.iter(|| {
+        let world = black_box(&mut world);
+        let entities = black_box(&mut entities);
+
+        let ent = *entities.next().unwrap();
+
+        world.exchange::<(Pos,), _>(ent, (Pos(0.0),));
+        world.exchange::<(Vel,), _>(ent, (Vel(0.0),));
+    });
+}
+
+#[bench]
 fn transfer(bencher: &mut Bencher) {
     let mut world = World::new();
 

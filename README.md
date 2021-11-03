@@ -11,6 +11,7 @@ It also has a few changes and additions specific to our use case:
 * It is not thread-safe as the execution of single-threaded simulations is trivially deterministic. Additionally, running multiple instances of these in parallel often gives the highest throughput.
 * It supports amortised random access to query results by entity identifier using the [`QueryRef::map` method](https://docs.rs/rs-ecs/*/rs_ecs/struct.QueryRef.html#method.map). This can be useful to efficiently traverse graph-like relations between entities.
 * Entities can be transferred between worlds without serialisation using the [`World::transfer` method](https://docs.rs/rs-ecs/*/rs_ecs/struct.World.html#method.transfer). We use this to completely remove entities from the simulation while keeping their full dynamic state around for later inspection.
+* The [`World::exchange` method](https://docs.rs/rs-ecs/*/rs_ecs/struct.World.html#method.exchange) combines removing some and then adding other components for a given entity. This can be used to optimise type-level state machines.
 * While queries must be dispatched from a single thread, their results can be iterated using multiple threads via the [`QueryRef::par_iter` method](https://docs.rs/rs-ecs/*/rs_ecs/struct.QueryRef.html#method.par_iter). The method is optional, implemented using [Rayon](https://github.com/rayon-rs/rayon) and enabled by the `rayon` Cargo feature.
 
 ## License

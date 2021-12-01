@@ -101,6 +101,7 @@ where
     ptrs: Vec<Option<<S::Fetch as Fetch<'static>>::Ptr>>,
 }
 
+#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl<S> Send for Query<S> where S: QuerySpec {}
 
 impl<S> Default for Query<S>

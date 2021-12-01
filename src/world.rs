@@ -593,6 +593,34 @@ impl World {
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
     }
+
+    /// Either update or insert the value of component `C` at entity `ent`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity1 = world.alloc();
+    /// world.insert(entity1, (0,));
+    ///
+    /// let entity2 = world.alloc();
+    ///
+    /// world.upsert(entity1, 1);
+    /// world.upsert(entity2, 2);
+    /// ```
+    pub fn upsert<C>(&mut self, ent: Entity, new_comp: C)
+    where
+        C: 'static,
+    {
+        if let Some(mut comp) = self.get_mut::<C>(ent) {
+            *comp = new_comp;
+            return;
+        }
+
+        self.insert(ent, (new_comp,));
+    }
 }
 
 /// An opaque entity identifier.

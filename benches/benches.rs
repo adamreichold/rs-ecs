@@ -272,7 +272,7 @@ fn query_map(bencher: &mut Bencher, spawn: fn(&mut World)) {
 
         let ent = *entities.next().unwrap();
 
-        let (_pos, _vel) = query.get(ent).unwrap();
+        let (_pos, _vel) = query.get_mut(ent).unwrap();
     });
 }
 

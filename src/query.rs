@@ -306,7 +306,7 @@ where
     /// let mut query = query.borrow(&world);
     /// let mut query = query.map();
     ///
-    /// let (i, f) = query.get(entity).unwrap();
+    /// let (i, f) = query.get_mut(entity).unwrap();
     ///
     /// assert_eq!(*i, 42);
     /// assert_eq!(*f, 1.0);
@@ -415,8 +415,8 @@ impl<S> QueryMap<'_, S>
 where
     S: QuerySpec,
 {
-    /// Access the queried components of the given [Entity]
-    pub fn get<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
+    /// Exclusively access the queried components of the given [Entity]
+    pub fn get_mut<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
         let meta = self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
@@ -961,7 +961,7 @@ mod tests {
         let mut query = query.map();
 
         for ent in entities {
-            query.get(ent).unwrap();
+            query.get_mut(ent).unwrap();
         }
     }
 

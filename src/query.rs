@@ -449,7 +449,7 @@ where
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
-            unsafe { transmute(&self.ptrs[meta.ty as usize]) };
+            unsafe { transmute(self.ptrs.get_unchecked(meta.ty as usize)) };
 
         ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
     }
@@ -460,7 +460,7 @@ where
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
-            unsafe { transmute(&self.ptrs[meta.ty as usize]) };
+            unsafe { transmute(self.ptrs.get_unchecked(meta.ty as usize)) };
 
         ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
     }

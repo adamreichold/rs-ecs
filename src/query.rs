@@ -415,6 +415,45 @@ impl<S> QueryMap<'_, S>
 where
     S: QuerySpec,
 {
+    /// Access the queried components of the given [Entity]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity1 = world.alloc();
+    /// world.insert(entity1, (42_i32, 1.0_f32));
+    ///
+    /// let entity2 = world.alloc();
+    /// world.insert(entity2, (23_i32,));
+    ///
+    /// let mut query = Query::<(&i32, Option<&f32>)>::new();
+    /// let mut query = query.borrow(&world);
+    /// let mut query = query.map();
+    ///
+    /// let (i1, f1) = query.get(entity1).unwrap();
+    /// let (i2, f2) = query.get(entity2).unwrap();
+    ///
+    /// assert_eq!(*i1, 42);
+    /// assert_eq!(f1.copied(), Some(1.0));
+    /// assert_eq!(*i2, 23);
+    /// assert_eq!(f2.copied(), None);
+    /// ```
+    pub fn get<'m>(&'m self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item>
+    where
+        S::Fetch: FetchShared,
+    {
+        let meta = self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
+
+        let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
+            unsafe { transmute(&self.ptrs[meta.ty as usize]) };
+
+        ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
+    }
+
     /// Exclusively access the queried components of the given [Entity]
     pub fn get_mut<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
         let meta = self.entities[ent.id as usize];
@@ -448,6 +487,9 @@ pub unsafe trait Fetch<'q> {
     fn dangling() -> Self::Ptr;
     unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item;
 }
+
+#[allow(clippy::missing_safety_doc)]
+pub unsafe trait FetchShared {}
 
 impl<'a, C> QuerySpec for &'a C
 where
@@ -488,6 +530,8 @@ where
         &*ptr.as_ptr().add(idx as usize)
     }
 }
+
+unsafe impl<C> FetchShared for FetchRead<C> {}
 
 impl<'a, C> QuerySpec for &'a mut C
 where
@@ -575,6 +619,8 @@ where
     }
 }
 
+unsafe impl<F> FetchShared for TryFetch<F> where F: FetchShared {}
+
 /// A query specification to iterate over entities with a certain component,
 /// but without borrowing that component.
 ///
@@ -636,6 +682,8 @@ where
     }
 }
 
+unsafe impl<F, C> FetchShared for FetchWith<F, C> where F: FetchShared {}
+
 /// A query specification to iterate over entities without a certain component.
 ///
 /// See also [Query::without()]
@@ -696,6 +744,8 @@ where
     }
 }
 
+unsafe impl<F, C> FetchShared for FetchWithout<F, C> where F: FetchShared {}
+
 macro_rules! impl_fetch_for_tuples {
     () => {};
 
@@ -753,6 +803,12 @@ macro_rules! impl_fetch_for_tuples {
 
                 ($($types::deref($types, idx),)+)
             }
+        }
+
+        unsafe impl<$($types),+> FetchShared for ($($types,)+)
+        where
+            $($types: FetchShared,)+
+        {
         }
     };
 }

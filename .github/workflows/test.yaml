@@ -27,3 +27,5 @@ jobs:
       with:
         command: miri
         args: test
+      env:
+        MIRIFLAGS: -Zmiri-tag-raw-pointers -Zmiri-check-number-validity

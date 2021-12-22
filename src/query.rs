@@ -24,6 +24,7 @@ use crate::rayon::QueryParIter;
 /// * `Option<Q>` - optional component(s)
 /// * `With<Q, C>` to filter `Q` for presence of `C`
 /// * `Without<Q, C>` to filter `Q` for absence of `C`
+/// * `Matches<Q> to indicate which entities match `Q`
 ///
 /// Note that [Entities](Entity) are components themselves, so they can be optionally obtained in a query,
 /// like `Query<Entity, &C, &mut D>`.
@@ -702,6 +703,75 @@ where
 }
 
 unsafe impl<F, C> FetchShared for FetchWithout<F, C> where F: FetchShared {}
+
+/// A query specification to indicate which entities match the inner query,
+/// but without borrowing any components.
+///
+/// # Examples
+///
+/// ```
+/// # use rs_ecs::*;
+/// let mut world = World::new();
+///
+/// let entity1 = world.alloc();
+/// world.insert(entity1, (42_i32, 1.0_f32));
+///
+/// let entity2 = world.alloc();
+/// world.insert(entity2, (23_i32,));
+///
+/// let mut query = Query::<(&i32, Matches<&f32>)>::new();
+/// let mut query = query.borrow(&world);
+/// let mut query = query.map();
+///
+/// let (i1, f1) = query.get(entity1).unwrap();
+/// assert_eq!(*i1, 42);
+/// assert!(f1);
+///
+/// let (i2, f2) = query.get(entity2).unwrap();
+/// assert_eq!(*i2, 23);
+/// assert!(!f2);
+/// ```
+pub struct Matches<S>(PhantomData<S>);
+
+impl<S> QuerySpec for Matches<S>
+where
+    S: QuerySpec,
+{
+    type Fetch = FetchMatches<S::Fetch>;
+}
+
+pub struct FetchMatches<F>(PhantomData<F>);
+
+unsafe impl<'q, F> Fetch<'q> for FetchMatches<F>
+where
+    F: Fetch<'q>,
+{
+    type Ty = bool;
+    type Ref = ();
+    type Ptr = bool;
+
+    type Item = bool;
+
+    fn find(archetype: &Archetype) -> Option<Self::Ty> {
+        Some(F::find(archetype).is_some())
+    }
+
+    unsafe fn borrow(_archetype: &'q Archetype, _ty: Self::Ty) -> Self::Ref {}
+
+    unsafe fn base_pointer(_archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
+        ty
+    }
+
+    fn dangling() -> Self::Ptr {
+        false
+    }
+
+    unsafe fn deref(ptr: Self::Ptr, _idx: u32) -> Self::Item {
+        ptr
+    }
+}
+
+unsafe impl<F> FetchShared for FetchMatches<F> {}
 
 macro_rules! impl_fetch_for_tuples {
     () => {};

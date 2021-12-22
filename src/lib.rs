@@ -34,7 +34,7 @@ mod world;
 
 pub use crate::{
     archetype::{Comp, CompMut},
-    query::{Query, QueryIter, QueryMap, QueryRef, QuerySpec, With, Without},
+    query::{Matches, Query, QueryIter, QueryMap, QueryRef, QuerySpec, With, Without},
     resources::{Res, ResMut, Resources},
     world::{Entity, World},
 };

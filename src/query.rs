@@ -193,41 +193,6 @@ where
 
         self.tag_gen = world.tag_gen();
     }
-
-    /// Narrow down a query to entities that have a certain component,
-    /// without borrowing that component.
-    ///
-    /// For use with prepared queries, see [With].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use rs_ecs::*;
-    /// let query = Query::<(&i32,)>::new().with::<bool>();
-    /// ```
-    pub fn with<C>(self) -> Query<With<S, C>>
-    where
-        C: 'static,
-    {
-        Query::new()
-    }
-
-    /// Narrow down a query to entities that do not have a certain component.
-    ///
-    /// For use with prepared queries, see [Without].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use rs_ecs::*;
-    /// let query = Query::<(&i32,)>::new().without::<bool>();
-    /// ```
-    pub fn without<C>(self) -> Query<Without<S, C>>
-    where
-        C: 'static,
-    {
-        Query::new()
-    }
 }
 
 /// Borrow of the [World] for a [Query]. Required to obtain an iterator.
@@ -624,8 +589,6 @@ unsafe impl<F> FetchShared for TryFetch<F> where F: FetchShared {}
 /// A query specification to iterate over entities with a certain component,
 /// but without borrowing that component.
 ///
-/// See also [Query::with()]
-///
 /// # Examples
 ///
 /// A query for components of type `u32` and `bool`,
@@ -685,8 +648,6 @@ where
 unsafe impl<F, C> FetchShared for FetchWith<F, C> where F: FetchShared {}
 
 /// A query specification to iterate over entities without a certain component.
-///
-/// See also [Query::without()]
 ///
 /// # Examples
 ///
@@ -982,7 +943,7 @@ mod tests {
 
         spawn_three(&mut world);
 
-        let mut query = Query::<&i32>::new().with::<bool>();
+        let mut query = Query::<With<&i32, bool>>::new();
         let sum = query.borrow(&world).iter().sum::<i32>();
 
         assert_eq!(sum, 42);
@@ -994,7 +955,7 @@ mod tests {
 
         spawn_three(&mut world);
 
-        let mut query = Query::<&i32>::new().without::<bool>();
+        let mut query = Query::<Without<&i32, bool>>::new();
         let sum = query.borrow(&world).iter().sum::<i32>();
 
         assert_eq!(sum, 23 + 1);

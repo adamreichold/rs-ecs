@@ -96,7 +96,7 @@ where
     S: QuerySpec,
 {
     tag_gen: (u32, u16),
-    types: Vec<(u16, <S::Fetch as Fetch<'static>>::Ty)>,
+    types: Box<[(u16, <S::Fetch as Fetch<'static>>::Ty)]>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
     ptrs: Box<[Option<<S::Fetch as Fetch<'static>>::Ptr>]>,
 }
@@ -182,13 +182,12 @@ where
     #[cold]
     #[inline(never)]
     fn find(&mut self, world: &World) {
-        self.types.clear();
-
-        for (idx, archetype) in world.archetypes.iter().enumerate() {
-            if let Some(ty) = S::Fetch::find(archetype) {
-                self.types.push((idx as u16, ty));
-            }
-        }
+        self.types = world
+            .archetypes
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, archetype)| S::Fetch::find(archetype).map(|ty| (idx as u16, ty)))
+            .collect();
 
         self.ptrs = world.archetypes.iter().map(|_| None).collect();
 

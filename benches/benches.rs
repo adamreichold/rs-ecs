@@ -114,10 +114,10 @@ fn insert_remove(bencher: &mut Bencher) {
 
         let ent = *entities.next().unwrap();
 
-        world.remove::<(Pos,)>(ent);
         world.remove::<(Vel,)>(ent);
+        world.insert(ent, (true,));
 
-        world.insert(ent, (Pos(0.0),));
+        world.remove::<(bool,)>(ent);
         world.insert(ent, (Vel(0.0),));
     });
 }
@@ -142,8 +142,8 @@ fn exchange(bencher: &mut Bencher) {
 
         let ent = *entities.next().unwrap();
 
-        world.exchange::<(Pos,), _>(ent, (Pos(0.0),));
-        world.exchange::<(Vel,), _>(ent, (Vel(0.0),));
+        world.exchange::<(Vel,), _>(ent, (true,));
+        world.exchange::<(bool,), _>(ent, (Vel(0.0),));
     });
 }
 

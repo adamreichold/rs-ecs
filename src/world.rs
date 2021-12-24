@@ -335,7 +335,11 @@ impl World {
         unsafe {
             let old_comps = B1::read(&mut self.archetypes[old_ty as usize], old_idx);
 
-            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
+            let new_idx = if new_ty != old_ty {
+                self.move_(ent.id, old_ty, new_ty, old_idx)
+            } else {
+                old_idx
+            };
 
             new_comps.write(&mut self.archetypes[new_ty as usize], new_idx);
 
@@ -382,6 +386,8 @@ impl World {
     }
 
     unsafe fn move_(&mut self, id: u32, old_ty: u16, new_ty: u16, old_idx: u32) -> u32 {
+        debug_assert_ne!(old_ty, new_ty);
+
         let old_archetype = &mut *self.archetypes.as_mut_ptr().add(old_ty as usize);
         let new_archetype = &mut *self.archetypes.as_mut_ptr().add(new_ty as usize);
 
@@ -922,6 +928,14 @@ mod tests {
         assert_eq!(world.remove_map.len(), 2);
         assert_eq!(world.remove_map[&(1, TypeId::of::<(i32, u64)>())], 0);
         assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 2);
+    }
+
+    #[test]
+    fn trival_exchange_does_not_create_aliasing_unique_references() {
+        let mut world = World::new();
+        let ent = world.alloc();
+        world.insert(ent, (true,));
+        world.exchange::<(bool,), _>(ent, (false,)).unwrap();
     }
 
     #[test]

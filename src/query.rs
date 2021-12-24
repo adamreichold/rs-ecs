@@ -98,7 +98,7 @@ where
     tag_gen: (u32, u16),
     types: Vec<(u16, <S::Fetch as Fetch<'static>>::Ty)>,
     refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
-    ptrs: Vec<Option<<S::Fetch as Fetch<'static>>::Ptr>>,
+    ptrs: Box<[Option<<S::Fetch as Fetch<'static>>::Ptr>]>,
 }
 
 #[allow(clippy::non_send_fields_in_send_ty)]
@@ -160,8 +160,8 @@ where
 
         let types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
         let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
-        let ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>> =
-            unsafe { transmute(&mut self.ptrs) };
+        let ptrs: &'w mut [Option<<S::Fetch as Fetch<'w>>::Ptr>] =
+            unsafe { transmute(&mut *self.ptrs) };
 
         for (idx, ty) in types {
             let archetype = &world.archetypes[*idx as usize];
@@ -189,6 +189,8 @@ where
                 self.types.push((idx as u16, ty));
             }
         }
+
+        self.ptrs = world.archetypes.iter().map(|_| None).collect();
 
         self.tag_gen = world.tag_gen();
     }
@@ -237,7 +239,7 @@ where
     world: &'w World,
     types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)],
     refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
-    ptrs: &'w mut Vec<Option<<S::Fetch as Fetch<'w>>::Ptr>>,
+    ptrs: &'w mut [Option<<S::Fetch as Fetch<'w>>::Ptr>],
 }
 
 impl<S> QueryRef<'_, S>
@@ -314,11 +316,10 @@ where
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
         let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
 
-        let ptrs: &'q mut Vec<Option<<S::Fetch as Fetch<'q>>::Ptr>> =
+        let ptrs: &'q mut [Option<<S::Fetch as Fetch<'q>>::Ptr>] =
             unsafe { transmute(&mut *self.ptrs) };
 
-        ptrs.clear();
-        ptrs.resize(self.world.archetypes.len(), None);
+        ptrs.fill(None);
 
         for (idx, ty) in types {
             let archetype = &self.world.archetypes[*idx as usize];

@@ -729,7 +729,7 @@ struct IndexTypeIdHasher(u64);
 
 impl Hasher for IndexTypeIdHasher {
     fn write_u16(&mut self, val: u16) {
-        self.0 = val as u64;
+        self.0 = u64::from(val);
     }
 
     fn write_u64(&mut self, val: u64) {
@@ -752,11 +752,11 @@ struct IndexTagHasher(u64);
 
 impl Hasher for IndexTagHasher {
     fn write_u16(&mut self, val: u16) {
-        self.0 = val as u64;
+        self.0 = u64::from(val);
     }
 
     fn write_u32(&mut self, val: u32) {
-        self.0 = self.0 << 32 | val as u64;
+        self.0 |= u64::from(val) << 16;
     }
 
     fn write(&mut self, _val: &[u8]) {
@@ -1084,7 +1084,7 @@ mod tests {
     fn index_type_id_yields_uniformly_distributed_lower_bits() {
         let mut histogram = [0; 128];
 
-        for i in 0..1024 {
+        for i in 0_u16..1024 {
             for t in [
                 TypeId::of::<(i32,)>(),
                 TypeId::of::<(bool, f32)>(),
@@ -1092,8 +1092,7 @@ mod tests {
                 TypeId::of::<(bool, &str, f64)>(),
             ] {
                 let mut hasher = IndexTypeIdHasher::default();
-                hasher.write_u16(i);
-                t.hash(&mut hasher);
+                (i, t).hash(&mut hasher);
                 let hash = hasher.finish();
 
                 histogram[hash as usize % histogram.len()] += 1;
@@ -1109,11 +1108,10 @@ mod tests {
     fn index_tag_hasher_yields_uniformly_distributed_lower_bits() {
         let mut histogram = [0; 128];
 
-        for i in 0..1024 {
-            for j in 0..128 {
+        for i in 0_u16..1024 {
+            for j in 0_u32..128 {
                 let mut hasher = IndexTagHasher::default();
-                hasher.write_u32(i);
-                hasher.write_u32(j);
+                (i, j).hash(&mut hasher);
                 let hash = hasher.finish();
 
                 histogram[hash as usize % histogram.len()] += 1;

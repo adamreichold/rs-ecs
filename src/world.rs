@@ -723,11 +723,11 @@ struct IndexTypeIdHasher(u64);
 
 impl Hasher for IndexTypeIdHasher {
     fn write_u16(&mut self, val: u16) {
-        self.0 = 1 + val as u64;
+        self.0 = val as u64;
     }
 
     fn write_u64(&mut self, val: u64) {
-        self.0 = self.0.wrapping_mul(val);
+        self.0 ^= val;
     }
 
     fn write(&mut self, _val: &[u8]) {
@@ -766,6 +766,7 @@ impl Hasher for IndexTagHasher {
 mod tests {
     use super::*;
 
+    use std::hash::Hash;
     use std::mem::size_of;
 
     #[test]
@@ -1071,6 +1072,31 @@ mod tests {
 
         let comp = world2.get::<i32>(ent2).unwrap();
         assert_eq!(*comp, 23);
+    }
+
+    #[test]
+    fn index_type_id_yields_uniformly_distributed_lower_bits() {
+        let mut histogram = [0; 128];
+
+        for i in 0..1024 {
+            for t in [
+                TypeId::of::<(i32,)>(),
+                TypeId::of::<(bool, f32)>(),
+                TypeId::of::<(i32, &str)>(),
+                TypeId::of::<(bool, &str, f64)>(),
+            ] {
+                let mut hasher = IndexTypeIdHasher::default();
+                hasher.write_u16(i);
+                t.hash(&mut hasher);
+                let hash = hasher.finish();
+
+                histogram[hash as usize % histogram.len()] += 1;
+            }
+        }
+
+        for count in histogram {
+            assert_eq!(count, 1024 * 4 / histogram.len());
+        }
     }
 
     #[test]

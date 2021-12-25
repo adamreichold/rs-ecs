@@ -168,13 +168,14 @@ fn transfer(bencher: &mut Bencher) {
         let entities = black_box(&mut entities);
         let other_entities = black_box(&mut other_entities);
 
-        if let Some(ent) = entities.pop() {
-            let ent = world.transfer(ent, other_world);
-            other_entities.push(ent);
-        } else {
+        if entities.is_empty() {
             swap(world, other_world);
             swap(entities, other_entities);
         }
+
+        let ent = entities.pop().unwrap();
+        let ent = world.transfer(ent, other_world);
+        other_entities.push(ent);
     });
 }
 

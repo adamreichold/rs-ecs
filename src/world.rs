@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
 
-/// The ECS world storing [Entities](Entity) and components.
+/// The world storing entities and their components.
 pub struct World {
     tag: u32,
     pub(crate) entities: Vec<EntityMetadata>,
@@ -178,14 +178,16 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let new_ty = if let Some(ty) = self.insert_map.get(&(meta.ty, TypeId::of::<B>())) {
+        let key = TypeId::of::<B>();
+
+        let new_ty = if let Some(ty) = self.insert_map.get(&(meta.ty, key)) {
             *ty
         } else {
             Self::insert_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
                 &mut self.remove_map,
-                TypeId::of::<B>(),
+                key,
                 B::insert,
                 meta.ty,
             )
@@ -207,7 +209,7 @@ impl World {
         archetypes: &mut Vec<Archetype>,
         insert_map: &mut IndexTypeIdMap<u16>,
         remove_map: &mut IndexTypeIdMap<u16>,
-        type_id: TypeId,
+        key: TypeId,
         insert: fn(&mut TypeMetadataSet),
         old_ty: u16,
     ) -> u16 {
@@ -216,8 +218,8 @@ impl World {
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        insert_map.insert((old_ty, type_id), new_ty);
-        remove_map.insert((new_ty, type_id), old_ty);
+        insert_map.insert((old_ty, key), new_ty);
+        remove_map.insert((new_ty, key), old_ty);
 
         new_ty
     }
@@ -243,14 +245,16 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let new_ty = if let Some(ty) = self.remove_map.get(&(meta.ty, TypeId::of::<B>())) {
+        let key = TypeId::of::<B>();
+
+        let new_ty = if let Some(ty) = self.remove_map.get(&(meta.ty, key)) {
             *ty
         } else {
             Self::remove_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
                 &mut self.remove_map,
-                TypeId::of::<B>(),
+                key,
                 B::remove,
                 meta.ty,
             )?
@@ -274,7 +278,7 @@ impl World {
         archetypes: &mut Vec<Archetype>,
         insert_map: &mut IndexTypeIdMap<u16>,
         remove_map: &mut IndexTypeIdMap<u16>,
-        type_id: TypeId,
+        key: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
         old_ty: u16,
     ) -> Option<u16> {
@@ -283,8 +287,8 @@ impl World {
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        remove_map.insert((old_ty, type_id), new_ty);
-        insert_map.insert((new_ty, type_id), old_ty);
+        remove_map.insert((old_ty, key), new_ty);
+        insert_map.insert((new_ty, key), old_ty);
 
         Some(new_ty)
     }
@@ -316,13 +320,15 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let new_ty = if let Some(ty) = self.exchange_map.get(&(meta.ty, TypeId::of::<(B1, B2)>())) {
+        let key = TypeId::of::<(B1, B2)>();
+
+        let new_ty = if let Some(ty) = self.exchange_map.get(&(meta.ty, key)) {
             *ty
         } else {
             Self::exchange_cold(
                 &mut self.archetypes,
                 &mut self.exchange_map,
-                TypeId::of::<(B1, B2)>(),
+                key,
                 B1::remove,
                 B2::insert,
                 meta.ty,
@@ -352,7 +358,7 @@ impl World {
     fn exchange_cold(
         archetypes: &mut Vec<Archetype>,
         exchange_map: &mut IndexTypeIdMap<u16>,
-        type_id: TypeId,
+        key: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
         insert: fn(&mut TypeMetadataSet),
         old_ty: u16,
@@ -363,7 +369,7 @@ impl World {
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        exchange_map.insert((old_ty, type_id), new_ty);
+        exchange_map.insert((old_ty, key), new_ty);
 
         Some(new_ty)
     }

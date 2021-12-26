@@ -1,5 +1,4 @@
 use std::any::TypeId;
-use std::cell::{Ref, RefMut};
 use std::iter::FusedIterator;
 use std::marker::PhantomData;
 use std::mem::{transmute, ManuallyDrop};
@@ -7,7 +6,7 @@ use std::ptr::NonNull;
 use std::slice::Iter;
 
 use crate::{
-    archetype::Archetype,
+    archetype::{Archetype, Ref, RefMut},
     world::{Entity, EntityMetadata, World},
 };
 
@@ -505,7 +504,7 @@ where
     C: 'static,
 {
     type Ty = u16;
-    type Ref = Ref<'q, ()>;
+    type Ref = Ref<'q>;
     type Ptr = NonNull<C>;
 
     type Item = &'q C;
@@ -547,7 +546,7 @@ where
     C: 'static,
 {
     type Ty = u16;
-    type Ref = RefMut<'q, ()>;
+    type Ref = RefMut<'q>;
     type Ptr = NonNull<C>;
 
     type Item = &'q mut C;

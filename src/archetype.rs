@@ -1,6 +1,6 @@
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, TypeId};
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::Cell;
 use std::cmp::Reverse;
 use std::mem::align_of;
 use std::ops::{Deref, DerefMut};
@@ -245,24 +245,20 @@ impl Archetype {
         ty
     }
 
-    pub unsafe fn borrow<C>(&self, ty: u16) -> Ref<'_, ()>
+    pub unsafe fn borrow<C>(&self, ty: u16) -> Ref<'_>
     where
         C: 'static,
     {
-        self.type_metadata::<C>(ty)
-            .borrow
-            .try_borrow()
-            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
+        Ref::new(&self.type_metadata::<C>(ty).borrow)
+            .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
-    pub unsafe fn borrow_mut<C>(&self, ty: u16) -> RefMut<'_, ()>
+    pub unsafe fn borrow_mut<C>(&self, ty: u16) -> RefMut<'_>
     where
         C: 'static,
     {
-        self.type_metadata::<C>(ty)
-            .borrow
-            .try_borrow_mut()
-            .unwrap_or_else(|_err| panic!("Component {} already borrowed", type_name::<C>()))
+        RefMut::new(&self.type_metadata::<C>(ty).borrow)
+            .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
     pub unsafe fn base_pointer<C>(&self, ty: u16) -> *mut C
@@ -309,7 +305,7 @@ impl Archetype {
 
 /// An immutable borrow of a component.
 pub struct Comp<'a, C> {
-    _ref: Ref<'a, ()>,
+    _ref: Ref<'a>,
     val: &'a C,
 }
 
@@ -323,7 +319,7 @@ impl<C> Deref for Comp<'_, C> {
 
 /// A mutable borrow of a component.
 pub struct CompMut<'a, C> {
-    _ref: RefMut<'a, ()>,
+    _ref: RefMut<'a>,
     val: &'a mut C,
 }
 
@@ -341,12 +337,62 @@ impl<C> DerefMut for CompMut<'_, C> {
     }
 }
 
+pub struct Ref<'a>(&'a Cell<isize>);
+
+impl<'a> Ref<'a> {
+    fn new(borrow: &'a Cell<isize>) -> Option<Self> {
+        let readers = borrow.get().wrapping_add(1);
+
+        if readers <= 0 {
+            cold();
+            return None;
+        }
+
+        borrow.set(readers);
+
+        Some(Self(borrow))
+    }
+}
+
+impl Drop for Ref<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
+pub struct RefMut<'a>(&'a Cell<isize>);
+
+impl<'a> RefMut<'a> {
+    fn new(borrow: &'a Cell<isize>) -> Option<Self> {
+        let writers = borrow.get();
+
+        if writers != 0 {
+            cold();
+            return None;
+        }
+
+        borrow.set(-1);
+
+        Some(Self(borrow))
+    }
+}
+
+impl Drop for RefMut<'_> {
+    fn drop(&mut self) {
+        self.0.set(0);
+    }
+}
+
+#[cold]
+#[inline(always)]
+fn cold() {}
+
 struct TypeMetadata {
     id: TypeId,
     layout: Layout,
     drop: unsafe fn(*mut u8, usize),
     base_pointer: *mut u8,
-    borrow: RefCell<()>,
+    borrow: Cell<isize>,
 }
 
 impl Clone for TypeMetadata {

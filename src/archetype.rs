@@ -1,6 +1,6 @@
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, TypeId};
-use std::cell::Cell;
+use std::cell::UnsafeCell;
 use std::cmp::Reverse;
 use std::mem::align_of;
 use std::ops::{Deref, DerefMut};
@@ -337,18 +337,20 @@ impl<C> DerefMut for CompMut<'_, C> {
     }
 }
 
-pub struct Ref<'a>(&'a Cell<isize>);
+pub struct Ref<'a>(&'a UnsafeCell<isize>);
 
 impl<'a> Ref<'a> {
-    fn new(borrow: &'a Cell<isize>) -> Option<Self> {
-        let readers = borrow.get().wrapping_add(1);
+    fn new(borrow: &'a UnsafeCell<isize>) -> Option<Self> {
+        let readers = unsafe { &mut *borrow.get() };
 
-        if readers <= 0 {
+        let new_readers = readers.wrapping_add(1);
+
+        if new_readers <= 0 {
             cold();
             return None;
         }
 
-        borrow.set(readers);
+        *readers = new_readers;
 
         Some(Self(borrow))
     }
@@ -356,22 +358,24 @@ impl<'a> Ref<'a> {
 
 impl Drop for Ref<'_> {
     fn drop(&mut self) {
-        self.0.set(self.0.get() - 1);
+        unsafe {
+            *self.0.get() -= 1;
+        }
     }
 }
 
-pub struct RefMut<'a>(&'a Cell<isize>);
+pub struct RefMut<'a>(&'a UnsafeCell<isize>);
 
 impl<'a> RefMut<'a> {
-    fn new(borrow: &'a Cell<isize>) -> Option<Self> {
-        let writers = borrow.get();
+    fn new(borrow: &'a UnsafeCell<isize>) -> Option<Self> {
+        let writers = unsafe { &mut *borrow.get() };
 
-        if writers != 0 {
+        if *writers != 0 {
             cold();
             return None;
         }
 
-        borrow.set(-1);
+        *writers = -1;
 
         Some(Self(borrow))
     }
@@ -379,7 +383,9 @@ impl<'a> RefMut<'a> {
 
 impl Drop for RefMut<'_> {
     fn drop(&mut self) {
-        self.0.set(0);
+        unsafe {
+            *self.0.get() = 0;
+        }
     }
 }
 
@@ -392,7 +398,7 @@ struct TypeMetadata {
     layout: Layout,
     drop: unsafe fn(*mut u8, usize),
     base_pointer: *mut u8,
-    borrow: Cell<isize>,
+    borrow: UnsafeCell<isize>,
 }
 
 impl Clone for TypeMetadata {

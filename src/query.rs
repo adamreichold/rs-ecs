@@ -158,25 +158,22 @@ where
 
         self.refs.clear();
 
-        let types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)] = unsafe { transmute(&*self.types) };
-        let refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref> = unsafe { transmute(&mut self.refs) };
-        let ptrs: &'w mut [Option<<S::Fetch as Fetch<'w>>::Ptr>] =
-            unsafe { transmute(&mut *self.ptrs) };
+        let ref_ = QueryRef {
+            world,
+            types: unsafe { transmute(&*self.types) },
+            refs: unsafe { transmute(&mut self.refs) },
+            ptrs: unsafe { transmute(&mut *self.ptrs) },
+        };
 
-        for (idx, ty) in types {
+        for (idx, ty) in ref_.types {
             let archetype = &world.archetypes[*idx as usize];
 
             if archetype.len() != 0 {
-                refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
+                ref_.refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
             }
         }
 
-        QueryRef {
-            world,
-            types,
-            refs,
-            ptrs,
-        }
+        ref_
     }
 
     #[cold]
@@ -820,6 +817,7 @@ mod tests {
     use super::*;
 
     use std::mem::{forget, size_of};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     fn spawn_three(world: &mut World) {
         let ent = world.alloc();
@@ -920,6 +918,23 @@ mod tests {
         let mut query = Query::<&mut i32>::new();
         forget(query.borrow(&world));
 
+        let _ = query.borrow(&world);
+    }
+
+    #[test]
+    fn conflicting_borrow_leaves_world_in_consistent_state() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let res = catch_unwind(AssertUnwindSafe(|| {
+            let mut query = Query::<(&i32, Option<(&mut i32, &bool)>)>::new();
+            let _ = query.borrow(&world);
+        }));
+
+        assert!(res.is_err());
+
+        let mut query = Query::<&mut i32>::new();
         let _ = query.borrow(&world);
     }
 

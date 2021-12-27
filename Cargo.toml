@@ -3,6 +3,7 @@ name = "rs-ecs"
 description = "reasonably simple entity component system"
 version = "0.4.1"
 edition = "2018"
+rust-version = "1.51"
 authors = ["Adam Reichold <adam.reichold@t-online.de>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/adamreichold/rs-ecs"

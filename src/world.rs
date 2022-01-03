@@ -772,6 +772,7 @@ impl Hasher for IndexTagHasher {
 mod tests {
     use super::*;
 
+    #[cfg(not(miri))]
     use std::hash::Hash;
     use std::mem::size_of;
 
@@ -1080,6 +1081,7 @@ mod tests {
         assert_eq!(*comp, 23);
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn index_type_id_yields_uniformly_distributed_lower_bits() {
         let mut histogram = [0; 128];
@@ -1104,6 +1106,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(miri))]
     #[test]
     fn index_tag_hasher_yields_uniformly_distributed_lower_bits() {
         let mut histogram = [0; 128];

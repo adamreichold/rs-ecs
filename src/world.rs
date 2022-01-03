@@ -79,7 +79,7 @@ impl World {
         let ent = Entity { id, gen: meta.gen };
 
         unsafe {
-            self.archetypes[0].pointer::<Entity>(meta.idx).write(ent);
+            self.archetypes[0].get_raw::<Entity>(meta.idx).write(ent);
         }
 
         ent
@@ -131,7 +131,7 @@ impl World {
     ) {
         unsafe {
             if archetype.free::<DROP>(idx) {
-                let swapped_ent = archetype.pointer::<Entity>(idx).read();
+                let swapped_ent = archetype.get_raw::<Entity>(idx).read();
 
                 entities[swapped_ent.id as usize].idx = idx;
             }
@@ -200,9 +200,20 @@ impl World {
         let new_ty = target.archetype;
 
         unsafe {
-            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
+            let new_idx = Self::move_(
+                &mut self.entities,
+                &mut self.archetypes,
+                ent.id,
+                old_ty,
+                new_ty,
+                old_idx,
+            );
 
-            comps.write(&mut self.archetypes[new_ty as usize], new_idx);
+            comps.write(
+                &mut self.archetypes[new_ty as usize],
+                &target.write_types,
+                new_idx,
+            );
         }
     }
 
@@ -282,9 +293,20 @@ impl World {
         let new_ty = target.archetype;
 
         unsafe {
-            let comps = B::read(&mut self.archetypes[old_ty as usize], old_idx);
+            let comps = B::read(
+                &mut self.archetypes[old_ty as usize],
+                &target.read_types,
+                old_idx,
+            );
 
-            self.move_(ent.id, old_ty, new_ty, old_idx);
+            Self::move_(
+                &mut self.entities,
+                &mut self.archetypes,
+                ent.id,
+                old_ty,
+                new_ty,
+                old_idx,
+            );
 
             Some(comps)
         }
@@ -375,15 +397,30 @@ impl World {
         let new_ty = target.archetype;
 
         unsafe {
-            let old_comps = B1::read(&mut self.archetypes[old_ty as usize], old_idx);
+            let old_comps = B1::read(
+                &mut self.archetypes[old_ty as usize],
+                &target.read_types,
+                old_idx,
+            );
 
             let new_idx = if new_ty != old_ty {
-                self.move_(ent.id, old_ty, new_ty, old_idx)
+                Self::move_(
+                    &mut self.entities,
+                    &mut self.archetypes,
+                    ent.id,
+                    old_ty,
+                    new_ty,
+                    old_idx,
+                )
             } else {
                 old_idx
             };
 
-            new_comps.write(&mut self.archetypes[new_ty as usize], new_idx);
+            new_comps.write(
+                &mut self.archetypes[new_ty as usize],
+                &target.write_types,
+                new_idx,
+            );
 
             Some(old_comps)
         }
@@ -440,19 +477,26 @@ impl World {
         }
     }
 
-    unsafe fn move_(&mut self, id: u32, old_ty: u16, new_ty: u16, old_idx: u32) -> u32 {
+    unsafe fn move_(
+        entities: &mut [EntityMetadata],
+        archetypes: &mut [Archetype],
+        id: u32,
+        old_ty: u16,
+        new_ty: u16,
+        old_idx: u32,
+    ) -> u32 {
         debug_assert_ne!(old_ty, new_ty);
 
-        let old_archetype = &mut *self.archetypes.as_mut_ptr().add(old_ty as usize);
-        let new_archetype = &mut *self.archetypes.as_mut_ptr().add(new_ty as usize);
+        let old_archetype = &mut *archetypes.as_mut_ptr().add(old_ty as usize);
+        let new_archetype = &mut *archetypes.as_mut_ptr().add(new_ty as usize);
 
         let new_idx = new_archetype.alloc();
 
         Archetype::move_(old_archetype, new_archetype, old_idx, new_idx);
 
-        Self::free_idx::<false>(old_archetype, old_idx, &mut self.entities);
+        Self::free_idx::<false>(old_archetype, old_idx, entities);
 
-        let meta = &mut self.entities[id as usize];
+        let meta = &mut entities[id as usize];
         meta.ty = new_ty;
         meta.idx = new_idx;
 
@@ -527,7 +571,7 @@ impl World {
 
         unsafe {
             other.archetypes[new_meta.ty as usize]
-                .pointer::<Entity>(new_meta.idx)
+                .get_raw::<Entity>(new_meta.idx)
                 .write(ent);
         }
 
@@ -736,19 +780,19 @@ pub unsafe trait Bundle: 'static {
     fn insert(types: &mut TypeMetadataSet);
     #[must_use]
     fn remove(types: &mut TypeMetadataSet) -> Option<()>;
-    unsafe fn write(self, archetype: &mut Archetype, idx: u32);
-    unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self;
+    unsafe fn write(self, archetype: &mut Archetype, types: &[u16], idx: u32);
+    unsafe fn read(archetype: &mut Archetype, types: &[u16], idx: u32) -> Self;
 }
 
 macro_rules! impl_bundle_for_tuples {
     () => {};
 
-    ($head:ident $(,$tail:ident)*) => {
-        impl_bundle_for_tuples!($($tail),*);
-        impl_bundle_for_tuples!(@impl $head $(,$tail)*);
+    ($types_head:ident => $indices_head:literal $(,$types_tail:ident => $indices_tail:literal)*) => {
+        impl_bundle_for_tuples!($($types_tail => $indices_tail),*);
+        impl_bundle_for_tuples!(@impl $types_head => $indices_head $(,$types_tail => $indices_tail)*);
     };
 
-    (@impl $($types:ident),+) => {
+    (@impl $($types:ident => $indices:literal),+) => {
         unsafe impl<$($types),+> Bundle for ($($types,)+)
         where
             $($types: 'static,)+
@@ -761,6 +805,8 @@ macro_rules! impl_bundle_for_tuples {
                         types.push(ty);
                     }
                 )+
+
+                types.reverse();
 
                 types.into()
             }
@@ -784,21 +830,29 @@ macro_rules! impl_bundle_for_tuples {
             }
 
             #[allow(non_snake_case)]
-            unsafe fn write(self, archetype: &mut Archetype, idx: u32) {
+            unsafe fn write(self, archetype: &mut Archetype, types: &[u16], idx: u32) {
                 let ($($types,)+) = self;
-                $(archetype.pointer::<$types>(idx).write($types);)+
+
+                $(
+                    let ty = types[$indices];
+                    archetype.pointer::<$types>(ty, idx).write($types);
+                )+
             }
 
             #[allow(non_snake_case)]
-            unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self {
-                $(let $types = archetype.pointer::<$types>(idx).read();)+
+            unsafe fn read(archetype: &mut Archetype, types: &[u16], idx: u32) -> Self {
+                $(
+                    let ty = types[$indices];
+                    let $types = archetype.pointer::<$types>(ty, idx).read();
+                )+
+
                 ($($types,)+)
             }
         }
     };
 }
 
-impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
+impl_bundle_for_tuples!(J => 9, I => 8, H => 7, G => 6, F => 5, E => 4, D => 3, C => 2, B => 1, A => 0);
 
 type IndexTypeIdMap<V> = HashMap<(u16, TypeId), V, BuildHasherDefault<IndexTypeIdHasher>>;
 

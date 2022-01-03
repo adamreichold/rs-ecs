@@ -840,7 +840,7 @@ macro_rules! impl_fetch_for_tuples {
     };
 }
 
-impl_fetch_for_tuples!(A, B, C, D, E, F, G, H, I, J);
+impl_fetch_for_tuples!(J, I, H, G, F, E, D, C, B, A);
 
 #[cfg(test)]
 mod tests {

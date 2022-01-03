@@ -195,18 +195,6 @@ impl Archetype {
 }
 
 impl Archetype {
-    pub unsafe fn pointer<C>(&mut self, idx: u32) -> *mut C
-    where
-        C: 'static,
-    {
-        debug_assert!(idx < self.len);
-
-        let ty = self.find::<C>().unwrap();
-        let ptr = self.base_pointer::<C>(ty);
-
-        ptr.add(idx as usize)
-    }
-
     pub unsafe fn move_(src: &mut Self, dst: &mut Self, src_idx: u32, dst_idx: u32) {
         debug_assert!(src_idx < src.len);
         debug_assert!(dst_idx < dst.len);
@@ -249,7 +237,9 @@ impl Archetype {
     where
         C: 'static,
     {
-        Ref::new(&self.type_metadata::<C>(ty).borrow)
+        let ty = self.type_metadata::<C>(ty);
+
+        Ref::new(&ty.borrow)
             .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
@@ -257,7 +247,9 @@ impl Archetype {
     where
         C: 'static,
     {
-        RefMut::new(&self.type_metadata::<C>(ty).borrow)
+        let ty = self.type_metadata::<C>(ty);
+
+        RefMut::new(&ty.borrow)
             .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
     }
 
@@ -269,20 +261,37 @@ impl Archetype {
 
         ty.base_pointer.cast::<C>()
     }
-}
 
-impl Archetype {
-    pub unsafe fn get<C>(&self, idx: u32) -> Option<Comp<'_, C>>
+    pub unsafe fn pointer<C>(&self, ty: u16, idx: u32) -> *mut C
     where
         C: 'static,
     {
         debug_assert!(idx < self.len);
 
-        let ty = self.find::<C>()?;
-        let _ref = self.borrow::<C>(ty);
         let ptr = self.base_pointer::<C>(ty);
 
-        let val = &*ptr.add(idx as usize);
+        ptr.add(idx as usize)
+    }
+}
+
+impl Archetype {
+    pub unsafe fn get_raw<C>(&mut self, idx: u32) -> *mut C
+    where
+        C: 'static,
+    {
+        let ty = self.find::<C>().unwrap();
+        self.pointer::<C>(ty, idx)
+    }
+
+    pub unsafe fn get<C>(&self, idx: u32) -> Option<Comp<'_, C>>
+    where
+        C: 'static,
+    {
+        let ty = self.find::<C>()?;
+        let _ref = self.borrow::<C>(ty);
+        let ptr = self.pointer::<C>(ty, idx);
+
+        let val = &*ptr;
 
         Some(Comp { _ref, val })
     }
@@ -291,13 +300,11 @@ impl Archetype {
     where
         C: 'static,
     {
-        debug_assert!(idx < self.len);
-
         let ty = self.find::<C>()?;
         let _ref = self.borrow_mut::<C>(ty);
-        let ptr = self.base_pointer::<C>(ty);
+        let ptr = self.pointer::<C>(ty, idx);
 
-        let val = &mut *ptr.add(idx as usize);
+        let val = &mut *ptr;
 
         Some(CompMut { _ref, val })
     }
@@ -529,7 +536,7 @@ mod tests {
             for _ in 0..32 {
                 let ent = archetype.alloc();
 
-                archetype.pointer::<CountDrops>(ent).write(CountDrops);
+                archetype.get_raw::<CountDrops>(ent).write(CountDrops);
             }
         }
 

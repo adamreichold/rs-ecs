@@ -11,7 +11,7 @@ use crate::{
     query::{Fetch, QuerySpec},
 };
 
-/// Used to iterate through the entities which match a certain [Query] in parallel.
+/// Used to iterate through the entities which match a certain [Query][crate::query::Query] in parallel.
 pub struct QueryParIter<'q, S>
 where
     S: QuerySpec,

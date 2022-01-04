@@ -157,9 +157,7 @@ impl World {
 
     /// Insert components for a given [Entity].
     ///
-    /// # Panics
-    ///
-    /// Panics if one of the components is already present for the entity.
+    /// If a component is already present for the entity, its value will be overwritten.
     ///
     /// # Example
     ///
@@ -186,7 +184,6 @@ impl World {
             Self::insert_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
-                &mut self.remove_map,
                 key,
                 B::insert,
                 meta.ty,
@@ -197,7 +194,13 @@ impl World {
         let old_idx = meta.idx;
 
         unsafe {
-            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
+            B::drop::<Empty>(&mut self.archetypes[old_ty as usize], old_idx);
+
+            let new_idx = if old_ty != new_ty {
+                self.move_(ent.id, old_ty, new_ty, old_idx)
+            } else {
+                old_idx
+            };
 
             comps.write(&mut self.archetypes[new_ty as usize], new_idx);
         }
@@ -208,7 +211,6 @@ impl World {
     fn insert_cold(
         archetypes: &mut Vec<Archetype>,
         insert_map: &mut IndexTypeIdMap<u16>,
-        remove_map: &mut IndexTypeIdMap<u16>,
         key: TypeId,
         insert: fn(&mut TypeMetadataSet),
         old_ty: u16,
@@ -219,7 +221,6 @@ impl World {
         let new_ty = Self::get_or_insert(archetypes, types);
 
         insert_map.insert((old_ty, key), new_ty);
-        remove_map.insert((new_ty, key), old_ty);
 
         new_ty
     }
@@ -252,7 +253,6 @@ impl World {
         } else {
             Self::remove_cold(
                 &mut self.archetypes,
-                &mut self.insert_map,
                 &mut self.remove_map,
                 key,
                 B::remove,
@@ -276,7 +276,6 @@ impl World {
     #[inline(never)]
     fn remove_cold(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap<u16>,
         remove_map: &mut IndexTypeIdMap<u16>,
         key: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
@@ -288,7 +287,6 @@ impl World {
         let new_ty = Self::get_or_insert(archetypes, types);
 
         remove_map.insert((old_ty, key), new_ty);
-        insert_map.insert((new_ty, key), old_ty);
 
         Some(new_ty)
     }
@@ -339,7 +337,11 @@ impl World {
         let old_idx = meta.idx;
 
         unsafe {
-            let old_comps = B1::read(&mut self.archetypes[old_ty as usize], old_idx);
+            let old_archetype = &mut self.archetypes[old_ty as usize];
+
+            let old_comps = B1::read(old_archetype, old_idx);
+
+            B2::drop::<B1>(old_archetype, old_idx);
 
             let new_idx = if new_ty != old_ty {
                 self.move_(ent.id, old_ty, new_ty, old_idx)
@@ -608,34 +610,6 @@ impl World {
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
     }
-
-    /// Either update or insert the value of component `C` at entity `ent`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use rs_ecs::*;
-    /// let mut world = World::new();
-    ///
-    /// let entity1 = world.alloc();
-    /// world.insert(entity1, (0,));
-    ///
-    /// let entity2 = world.alloc();
-    ///
-    /// world.upsert(entity1, 1);
-    /// world.upsert(entity2, 2);
-    /// ```
-    pub fn upsert<C>(&mut self, ent: Entity, new_comp: C)
-    where
-        C: 'static,
-    {
-        if let Some(mut comp) = self.get_mut::<C>(ent) {
-            *comp = new_comp;
-            return;
-        }
-
-        self.insert(ent, (new_comp,));
-    }
 }
 
 /// An opaque entity identifier.
@@ -669,12 +643,54 @@ impl EntityMetadata {
 }
 
 #[allow(clippy::missing_safety_doc)]
-pub unsafe trait Bundle: 'static {
+pub unsafe trait Bundle
+where
+    Self: 'static,
+{
+    fn contains<T>() -> bool
+    where
+        T: 'static;
+
     fn insert(types: &mut TypeMetadataSet);
     #[must_use]
     fn remove(types: &mut TypeMetadataSet) -> Option<()>;
+
+    unsafe fn drop<T>(archetype: &mut Archetype, idx: u32)
+    where
+        T: Bundle;
+
     unsafe fn write(self, archetype: &mut Archetype, idx: u32);
     unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self;
+}
+
+struct Empty;
+
+unsafe impl Bundle for Empty {
+    fn contains<T>() -> bool
+    where
+        T: 'static,
+    {
+        false
+    }
+
+    fn insert(_types: &mut TypeMetadataSet) {}
+
+    #[must_use]
+    fn remove(_types: &mut TypeMetadataSet) -> Option<()> {
+        Some(())
+    }
+
+    unsafe fn drop<T>(_archetype: &mut Archetype, _idx: u32)
+    where
+        T: Bundle,
+    {
+    }
+
+    unsafe fn write(self, _archetype: &mut Archetype, _idx: u32) {}
+
+    unsafe fn read(_archetype: &mut Archetype, _idx: u32) -> Self {
+        Self
+    }
 }
 
 macro_rules! impl_bundle_for_tuples {
@@ -698,8 +714,29 @@ macro_rules! impl_bundle_for_tuples {
         where
             $($types: 'static,)+
         {
+            fn contains<T>() -> bool
+            where
+                T: 'static
+            {
+                $(
+                    if TypeId::of::<$types>() == TypeId::of::<T>() {
+                        return true;
+                    }
+                )+
+
+                false
+            }
+
             fn insert(types: &mut TypeMetadataSet) {
-                $(types.insert::<$types>();)+
+                $(
+                    assert_ne!(
+                        TypeId::of::<$types>(),
+                        TypeId::of::<Entity>(),
+                        "Entity cannot be inserted"
+                    );
+
+                    types.insert::<$types>();
+                )+
             }
 
             fn remove(types: &mut TypeMetadataSet) -> Option<()> {
@@ -714,6 +751,17 @@ macro_rules! impl_bundle_for_tuples {
                 )+
 
                 Some(())
+            }
+
+            unsafe fn drop<T>(archetype: &mut Archetype, idx: u32)
+            where
+                T: Bundle
+            {
+                $(
+                    if !T::contains::<$types>() {
+                        archetype.drop::<$types>(idx);
+                    }
+                )+
             }
 
             #[allow(non_snake_case)]
@@ -783,9 +831,19 @@ impl Hasher for IndexTagHasher {
 mod tests {
     use super::*;
 
+    use std::cell::Cell;
     #[cfg(not(miri))]
     use std::hash::Hash;
     use std::mem::size_of;
+    use std::rc::Rc;
+
+    struct SetOnDrop(Rc<Cell<bool>>);
+
+    impl Drop for SetOnDrop {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
 
     #[test]
     fn alloc_creates_unique_entities() {
@@ -853,7 +911,6 @@ mod tests {
         assert_eq!(world.archetypes[0].len(), 0);
 
         assert_eq!(world.insert_map.len(), 0);
-        assert_eq!(world.remove_map.len(), 0);
 
         let ent = world.alloc();
 
@@ -866,7 +923,6 @@ mod tests {
         assert_eq!(world.archetypes[0].len(), 1);
 
         assert_eq!(world.insert_map.len(), 0);
-        assert_eq!(world.remove_map.len(), 0);
 
         world.insert(ent, (23_i32,));
 
@@ -881,9 +937,6 @@ mod tests {
 
         assert_eq!(world.insert_map.len(), 1);
         assert_eq!(world.insert_map[&(0, TypeId::of::<(i32,)>())], 1);
-
-        assert_eq!(world.remove_map.len(), 1);
-        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 0);
     }
 
     #[test]
@@ -900,17 +953,6 @@ mod tests {
 
         let ent = world.alloc();
 
-        assert_eq!(world.entities.len(), 1);
-        assert_eq!(world.entities[0].gen.get(), 1);
-        assert_eq!(world.entities[0].ty, 0);
-        assert_eq!(world.entities[0].idx, 0);
-
-        assert_eq!(world.archetypes.len(), 1);
-        assert_eq!(world.archetypes[0].len(), 1);
-
-        assert_eq!(world.insert_map.len(), 0);
-        assert_eq!(world.remove_map.len(), 0);
-
         world.insert(ent, (23_i32, 42_u64));
 
         assert_eq!(world.entities.len(), 1);
@@ -922,11 +964,7 @@ mod tests {
         assert_eq!(world.archetypes[0].len(), 0);
         assert_eq!(world.archetypes[1].len(), 1);
 
-        assert_eq!(world.insert_map.len(), 1);
-        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, u64)>())], 1);
-
-        assert_eq!(world.remove_map.len(), 1);
-        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32, u64)>())], 0);
+        assert_eq!(world.remove_map.len(), 0);
 
         world.remove::<(i32,)>(ent).unwrap();
 
@@ -940,13 +978,62 @@ mod tests {
         assert_eq!(world.archetypes[1].len(), 0);
         assert_eq!(world.archetypes[2].len(), 1);
 
-        assert_eq!(world.insert_map.len(), 2);
-        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, u64)>())], 1);
-        assert_eq!(world.insert_map[&(2, TypeId::of::<(i32,)>())], 1);
-
-        assert_eq!(world.remove_map.len(), 2);
-        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32, u64)>())], 0);
+        assert_eq!(world.remove_map.len(), 1);
         assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 2);
+    }
+
+    #[test]
+    fn insert_can_be_used_to_overwrite_components() {
+        let drop1 = Rc::new(Cell::new(false));
+        let drop2 = Rc::new(Cell::new(false));
+        let drop3 = Rc::new(Cell::new(false));
+
+        let mut world = World::new();
+
+        let entity1 = world.alloc();
+        world.insert(entity1, (0, SetOnDrop(drop1.clone())));
+
+        let entity2 = world.alloc();
+
+        world.insert(entity1, (1, SetOnDrop(drop2.clone())));
+        world.insert(entity2, (2, SetOnDrop(drop3.clone())));
+
+        assert_eq!(*world.get::<i32>(entity1).unwrap(), 1);
+        assert_eq!(*world.get::<i32>(entity2).unwrap(), 2);
+
+        assert_eq!(world.insert_map.len(), 2);
+        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, SetOnDrop)>())], 1);
+        assert_eq!(world.insert_map[&(1, TypeId::of::<(i32, SetOnDrop)>())], 1);
+
+        assert!(drop1.get());
+        assert!(!drop2.get());
+        assert!(!drop3.get());
+    }
+
+    #[test]
+    fn exchange_can_be_used_to_overwrite_components() {
+        let drop1 = Rc::new(Cell::new(false));
+        let drop2 = Rc::new(Cell::new(false));
+
+        let mut world = World::new();
+
+        let entity = world.alloc();
+        world.insert(entity, (0, true, SetOnDrop(drop1.clone())));
+        world
+            .exchange::<(bool,), _>(entity, (1, SetOnDrop(drop2.clone())))
+            .unwrap();
+
+        assert_eq!(*world.get::<i32>(entity).unwrap(), 1);
+        assert!(!world.contains::<bool>(entity));
+
+        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(
+            world.exchange_map[&(1, TypeId::of::<((bool,), (i32, SetOnDrop))>())],
+            2
+        );
+
+        assert!(drop1.get());
+        assert!(!drop2.get());
     }
 
     #[test]

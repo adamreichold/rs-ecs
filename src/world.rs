@@ -194,13 +194,9 @@ impl World {
         let old_idx = meta.idx;
 
         unsafe {
-            B::drop::<Empty>(&mut self.archetypes[old_ty as usize], old_idx);
+            B::drop::<()>(&mut self.archetypes[old_ty as usize], old_idx);
 
-            let new_idx = if old_ty != new_ty {
-                self.move_(ent.id, old_ty, new_ty, old_idx)
-            } else {
-                old_idx
-            };
+            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
 
             comps.write(&mut self.archetypes[new_ty as usize], new_idx);
         }
@@ -343,11 +339,7 @@ impl World {
 
             B2::drop::<B1>(old_archetype, old_idx);
 
-            let new_idx = if new_ty != old_ty {
-                self.move_(ent.id, old_ty, new_ty, old_idx)
-            } else {
-                old_idx
-            };
+            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
 
             new_comps.write(&mut self.archetypes[new_ty as usize], new_idx);
 
@@ -394,9 +386,12 @@ impl World {
     }
 
     unsafe fn move_(&mut self, id: u32, old_ty: u16, new_ty: u16, old_idx: u32) -> u32 {
+        if old_ty == new_ty {
+            return old_idx;
+        }
+
         debug_assert!(self.archetypes.len() > old_ty as usize);
         debug_assert!(self.archetypes.len() > new_ty as usize);
-        debug_assert_ne!(old_ty, new_ty);
 
         let archetypes = self.archetypes.as_mut_ptr();
         let old_archetype = &mut *archetypes.add(old_ty as usize);
@@ -663,38 +658,10 @@ where
     unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self;
 }
 
-struct Empty;
-
-unsafe impl Bundle for Empty {
-    fn contains<T>() -> bool
-    where
-        T: 'static,
-    {
-        false
-    }
-
-    fn insert(_types: &mut TypeMetadataSet) {}
-
-    #[must_use]
-    fn remove(_types: &mut TypeMetadataSet) -> Option<()> {
-        Some(())
-    }
-
-    unsafe fn drop<T>(_archetype: &mut Archetype, _idx: u32)
-    where
-        T: Bundle,
-    {
-    }
-
-    unsafe fn write(self, _archetype: &mut Archetype, _idx: u32) {}
-
-    unsafe fn read(_archetype: &mut Archetype, _idx: u32) -> Self {
-        Self
-    }
-}
-
 macro_rules! impl_bundle_for_tuples {
-    () => {};
+    () => {
+        impl_bundle_for_tuples!(@impl);
+    };
 
     ($head:ident $(,$tail:ident)*) => {
         impl_bundle_for_tuples!($($tail),*);
@@ -709,10 +676,11 @@ macro_rules! impl_bundle_for_tuples {
         impl_bundle_for_tuples!(@rev $($tail),*; $head $(,$rev)*);
     };
 
-    (@impl $($types:ident),+) => {
-        unsafe impl<$($types),+> Bundle for ($($types,)+)
+    (@impl $($types:ident),*) => {
+        #[allow(unused_variables)]
+        unsafe impl<$($types),*> Bundle for ($($types,)*)
         where
-            $($types: 'static,)+
+            $($types: 'static,)*
         {
             fn contains<T>() -> bool
             where
@@ -722,7 +690,7 @@ macro_rules! impl_bundle_for_tuples {
                     if TypeId::of::<$types>() == TypeId::of::<T>() {
                         return true;
                     }
-                )+
+                )*
 
                 false
             }
@@ -736,7 +704,7 @@ macro_rules! impl_bundle_for_tuples {
                     );
 
                     types.insert::<$types>();
-                )+
+                )*
             }
 
             fn remove(types: &mut TypeMetadataSet) -> Option<()> {
@@ -748,7 +716,7 @@ macro_rules! impl_bundle_for_tuples {
                     );
 
                     types.remove::<$types>()?;
-                )+
+                )*
 
                 Some(())
             }
@@ -761,19 +729,20 @@ macro_rules! impl_bundle_for_tuples {
                     if !T::contains::<$types>() {
                         archetype.drop::<$types>(idx);
                     }
-                )+
+                )*
             }
 
             #[allow(non_snake_case)]
             unsafe fn write(self, archetype: &mut Archetype, idx: u32) {
-                let ($($types,)+) = self;
-                $(archetype.get_raw::<$types>(idx).write($types);)+
+                let ($($types,)*) = self;
+                $(archetype.get_raw::<$types>(idx).write($types);)*
             }
 
             #[allow(non_snake_case)]
+            #[allow(clippy::unused_unit)]
             unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self {
-                $(let $types = archetype.get_raw::<$types>(idx).read();)+
-                ($($types,)+)
+                $(let $types = archetype.get_raw::<$types>(idx).read();)*
+                ($($types,)*)
             }
         }
     };

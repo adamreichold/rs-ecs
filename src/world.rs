@@ -79,7 +79,7 @@ impl World {
         let ent = Entity { id, gen: meta.gen };
 
         unsafe {
-            self.archetypes[0].pointer::<Entity>(meta.idx).write(ent);
+            self.archetypes[0].get_raw::<Entity>(meta.idx).write(ent);
         }
 
         ent
@@ -131,7 +131,7 @@ impl World {
     ) {
         unsafe {
             if archetype.free::<DROP>(idx) {
-                let swapped_ent = archetype.pointer::<Entity>(idx).read();
+                let swapped_ent = archetype.get_raw::<Entity>(idx).read();
 
                 entities[swapped_ent.id as usize].idx = idx;
             }
@@ -478,7 +478,7 @@ impl World {
 
         unsafe {
             other.archetypes[new_meta.ty as usize]
-                .pointer::<Entity>(new_meta.idx)
+                .get_raw::<Entity>(new_meta.idx)
                 .write(ent);
         }
 
@@ -708,12 +708,12 @@ macro_rules! impl_bundle_for_tuples {
             #[allow(non_snake_case)]
             unsafe fn write(self, archetype: &mut Archetype, idx: u32) {
                 let ($($types,)+) = self;
-                $(archetype.pointer::<$types>(idx).write($types);)+
+                $(archetype.get_raw::<$types>(idx).write($types);)+
             }
 
             #[allow(non_snake_case)]
             unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self {
-                $(let $types = archetype.pointer::<$types>(idx).read();)+
+                $(let $types = archetype.get_raw::<$types>(idx).read();)+
                 ($($types,)+)
             }
         }

@@ -720,7 +720,7 @@ macro_rules! impl_bundle_for_tuples {
     };
 }
 
-impl_bundle_for_tuples!(A, B, C, D, E, F, G, H, I, J);
+impl_bundle_for_tuples!(J, I, H, G, F, E, D, C, B, A);
 
 type IndexTypeIdMap<V> = HashMap<(u16, TypeId), V, BuildHasherDefault<IndexTypeIdHasher>>;
 

@@ -2,7 +2,7 @@ use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::{type_name, TypeId};
 use std::cell::UnsafeCell;
 use std::cmp::Reverse;
-use std::mem::align_of;
+use std::mem::{align_of, needs_drop};
 use std::ops::{Deref, DerefMut};
 use std::ptr::{copy_nonoverlapping, drop_in_place};
 use std::slice::from_raw_parts_mut;
@@ -275,6 +275,23 @@ impl Archetype {
 }
 
 impl Archetype {
+    pub unsafe fn drop<C>(&mut self, idx: u32)
+    where
+        C: 'static,
+    {
+        if needs_drop::<C>() {
+            if let Some(ty) = self.find::<C>() {
+                let ty = self.types.get_unchecked(ty as usize);
+
+                let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
+
+                (ty.drop)(ptr, 1);
+            }
+        }
+    }
+}
+
+impl Archetype {
     pub unsafe fn get_raw<C>(&mut self, idx: u32) -> *mut C
     where
         C: 'static,
@@ -447,11 +464,8 @@ impl TypeMetadataSet {
     where
         C: 'static,
     {
-        let ty = self.0.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id);
-
-        match ty {
-            Err(ty) => self.0.insert(ty, TypeMetadata::new::<C>()),
-            Ok(_) => panic!("Component {} already present", type_name::<C>()),
+        if let Err(ty) = self.0.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id) {
+            self.0.insert(ty, TypeMetadata::new::<C>());
         }
     }
 
@@ -475,7 +489,8 @@ impl TypeMetadataSet {
 mod tests {
     use super::*;
 
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     #[test]
     fn reverse_sorting_by_alignment_avoids_padding() {
@@ -517,15 +532,17 @@ mod tests {
 
     #[test]
     fn drops_all_component_values() {
-        static DROPS: AtomicUsize = AtomicUsize::new(0);
-
-        struct CountDrops;
+        struct CountDrops(Rc<Cell<usize>>);
 
         impl Drop for CountDrops {
             fn drop(&mut self) {
-                DROPS.fetch_add(1, Ordering::Relaxed);
+                let drops = &self.0;
+
+                drops.set(drops.get() + 1);
             }
         }
+
+        let drops = Rc::new(Cell::new(0));
 
         let mut types = TypeMetadataSet::default();
         types.insert::<CountDrops>();
@@ -536,12 +553,14 @@ mod tests {
             for _ in 0..32 {
                 let ent = archetype.alloc();
 
-                archetype.get_raw::<CountDrops>(ent).write(CountDrops);
+                archetype
+                    .get_raw::<CountDrops>(ent)
+                    .write(CountDrops(drops.clone()));
             }
         }
 
         drop(archetype);
 
-        assert_eq!(DROPS.load(Ordering::Relaxed), 32);
+        assert_eq!(drops.get(), 32);
     }
 }

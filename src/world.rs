@@ -682,7 +682,15 @@ macro_rules! impl_bundle_for_tuples {
 
     ($head:ident $(,$tail:ident)*) => {
         impl_bundle_for_tuples!($($tail),*);
-        impl_bundle_for_tuples!(@impl $head $(,$tail)*);
+        impl_bundle_for_tuples!(@rev $head $(,$tail)*;);
+    };
+
+    (@rev ; $($rev:ident),*) => {
+        impl_bundle_for_tuples!(@impl $($rev),*);
+    };
+
+    (@rev $head:ident $(,$tail:ident)*; $($rev:ident),*) => {
+        impl_bundle_for_tuples!(@rev $($tail),*; $head $(,$rev)*);
     };
 
     (@impl $($types:ident),+) => {

@@ -1,5 +1,5 @@
 use std::any::TypeId;
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
@@ -157,9 +157,7 @@ impl World {
 
     /// Insert components for a given [Entity].
     ///
-    /// # Panics
-    ///
-    /// Panics if one of the components is already present for the entity.
+    /// If a component is already present for the entity, its value will be overwritten.
     ///
     /// # Example
     ///
@@ -186,7 +184,6 @@ impl World {
             Self::insert_cold(
                 &mut self.archetypes,
                 &mut self.insert_map,
-                &mut self.remove_map,
                 key,
                 B::find,
                 B::insert,
@@ -200,14 +197,24 @@ impl World {
         let new_ty = target.archetype;
 
         unsafe {
-            let new_idx = Self::move_(
-                &mut self.entities,
-                &mut self.archetypes,
-                ent.id,
-                old_ty,
-                new_ty,
-                old_idx,
-            );
+            let archetype = &mut self.archetypes[old_ty as usize];
+
+            for ty in &*target.drop_types {
+                archetype.drop(*ty, old_idx);
+            }
+
+            let new_idx = if new_ty != old_ty {
+                Self::move_(
+                    &mut self.entities,
+                    &mut self.archetypes,
+                    ent.id,
+                    old_ty,
+                    new_ty,
+                    old_idx,
+                )
+            } else {
+                old_idx
+            };
 
             comps.write(
                 &mut self.archetypes[new_ty as usize],
@@ -222,30 +229,27 @@ impl World {
     fn insert_cold<'a>(
         archetypes: &mut Vec<Archetype>,
         insert_map: &'a mut IndexTypeIdMap<InsertTarget>,
-        remove_map: &mut IndexTypeIdMap<RemoveTarget>,
         key: TypeId,
-        find: fn(&Archetype) -> Box<[u16]>,
+        find: fn(&Archetype) -> Vec<u16>,
         insert: fn(&mut TypeMetadataSet),
         old_ty: u16,
     ) -> &'a InsertTarget {
-        let mut types = archetypes[old_ty as usize].types();
+        let archetype = &archetypes[old_ty as usize];
+
+        let mut types = archetype.types();
         insert(&mut types);
+
+        let drop_types = find(archetype).into_boxed_slice();
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        let write_types = find(&archetypes[new_ty as usize]);
+        let write_types = find(&archetypes[new_ty as usize]).into_boxed_slice();
 
         let target = insert_map.entry((old_ty, key)).or_insert(InsertTarget {
             archetype: new_ty,
+            drop_types,
             write_types,
         });
-
-        if let Entry::Vacant(entry) = remove_map.entry((new_ty, key)) {
-            entry.insert(RemoveTarget {
-                archetype: old_ty,
-                read_types: target.write_types.clone(),
-            });
-        }
 
         target
     }
@@ -278,7 +282,6 @@ impl World {
         } else {
             Self::remove_cold(
                 &mut self.archetypes,
-                &mut self.insert_map,
                 &mut self.remove_map,
                 key,
                 B::find,
@@ -316,10 +319,9 @@ impl World {
     #[inline(never)]
     fn remove_cold<'a>(
         archetypes: &mut Vec<Archetype>,
-        insert_map: &mut IndexTypeIdMap<InsertTarget>,
         remove_map: &'a mut IndexTypeIdMap<RemoveTarget>,
         key: TypeId,
-        find: fn(&Archetype) -> Box<[u16]>,
+        find: fn(&Archetype) -> Vec<u16>,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
         old_ty: u16,
     ) -> Option<&'a RemoveTarget> {
@@ -328,7 +330,7 @@ impl World {
         let mut types = archetype.types();
         remove(&mut types)?;
 
-        let read_types = find(archetype);
+        let read_types = find(archetype).into_boxed_slice();
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
@@ -336,13 +338,6 @@ impl World {
             archetype: new_ty,
             read_types,
         });
-
-        if let Entry::Vacant(entry) = insert_map.entry((new_ty, key)) {
-            entry.insert(InsertTarget {
-                archetype: old_ty,
-                write_types: target.read_types.clone(),
-            });
-        }
 
         Some(target)
     }
@@ -397,11 +392,13 @@ impl World {
         let new_ty = target.archetype;
 
         unsafe {
-            let old_comps = B1::read(
-                &mut self.archetypes[old_ty as usize],
-                &target.read_types,
-                old_idx,
-            );
+            let archetype = &mut self.archetypes[old_ty as usize];
+
+            let old_comps = B1::read(archetype, &target.read_types, old_idx);
+
+            for ty in &*target.drop_types {
+                archetype.drop(*ty, old_idx);
+            }
 
             let new_idx = if new_ty != old_ty {
                 Self::move_(
@@ -433,8 +430,8 @@ impl World {
         archetypes: &mut Vec<Archetype>,
         exchange_map: &'a mut IndexTypeIdMap<ExchangeTarget>,
         key: TypeId,
-        find1: fn(&Archetype) -> Box<[u16]>,
-        find2: fn(&Archetype) -> Box<[u16]>,
+        find1: fn(&Archetype) -> Vec<u16>,
+        find2: fn(&Archetype) -> Vec<u16>,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
         insert: fn(&mut TypeMetadataSet),
         old_ty: u16,
@@ -445,15 +442,20 @@ impl World {
         remove(&mut types)?;
         insert(&mut types);
 
-        let read_types = find1(archetype);
+        let read_types = find1(archetype).into_boxed_slice();
+
+        let mut drop_types = find2(archetype);
+        drop_types.retain(|ty| !read_types.contains(ty));
+        let drop_types = drop_types.into_boxed_slice();
 
         let new_ty = Self::get_or_insert(archetypes, types);
 
-        let write_types = find2(&archetypes[new_ty as usize]);
+        let write_types = find2(&archetypes[new_ty as usize]).into_boxed_slice();
 
         let target = exchange_map.entry((old_ty, key)).or_insert(ExchangeTarget {
             archetype: new_ty,
             read_types,
+            drop_types,
             write_types,
         });
 
@@ -485,10 +487,13 @@ impl World {
         new_ty: u16,
         old_idx: u32,
     ) -> u32 {
+        debug_assert!(archetypes.len() > old_ty as usize);
+        debug_assert!(archetypes.len() > new_ty as usize);
         debug_assert_ne!(old_ty, new_ty);
 
-        let old_archetype = &mut *archetypes.as_mut_ptr().add(old_ty as usize);
-        let new_archetype = &mut *archetypes.as_mut_ptr().add(new_ty as usize);
+        let archetypes = archetypes.as_mut_ptr();
+        let old_archetype = &mut *archetypes.add(old_ty as usize);
+        let new_archetype = &mut *archetypes.add(new_ty as usize);
 
         let new_idx = new_archetype.alloc();
 
@@ -698,34 +703,6 @@ impl World {
 
         unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
     }
-
-    /// Either update or insert the value of component `C` at entity `ent`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use rs_ecs::*;
-    /// let mut world = World::new();
-    ///
-    /// let entity1 = world.alloc();
-    /// world.insert(entity1, (0,));
-    ///
-    /// let entity2 = world.alloc();
-    ///
-    /// world.upsert(entity1, 1);
-    /// world.upsert(entity2, 2);
-    /// ```
-    pub fn upsert<C>(&mut self, ent: Entity, new_comp: C)
-    where
-        C: 'static,
-    {
-        if let Some(mut comp) = self.get_mut::<C>(ent) {
-            *comp = new_comp;
-            return;
-        }
-
-        self.insert(ent, (new_comp,));
-    }
 }
 
 /// An opaque entity identifier.
@@ -760,6 +737,7 @@ impl EntityMetadata {
 
 struct InsertTarget {
     archetype: u16,
+    drop_types: Box<[u16]>,
     write_types: Box<[u16]>,
 }
 
@@ -771,12 +749,13 @@ struct RemoveTarget {
 struct ExchangeTarget {
     archetype: u16,
     read_types: Box<[u16]>,
+    drop_types: Box<[u16]>,
     write_types: Box<[u16]>,
 }
 
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait Bundle: 'static {
-    fn find(archetype: &Archetype) -> Box<[u16]>;
+    fn find(archetype: &Archetype) -> Vec<u16>;
     fn insert(types: &mut TypeMetadataSet);
     #[must_use]
     fn remove(types: &mut TypeMetadataSet) -> Option<()>;
@@ -797,7 +776,7 @@ macro_rules! impl_bundle_for_tuples {
         where
             $($types: 'static,)+
         {
-            fn find(archetype: &Archetype) -> Box<[u16]> {
+            fn find(archetype: &Archetype) -> Vec<u16> {
                 let mut types = Vec::new();
 
                 $(
@@ -808,11 +787,19 @@ macro_rules! impl_bundle_for_tuples {
 
                 types.reverse();
 
-                types.into()
+                types
             }
 
             fn insert(types: &mut TypeMetadataSet) {
-                $(types.insert::<$types>();)+
+                $(
+                    assert_ne!(
+                        TypeId::of::<$types>(),
+                        TypeId::of::<Entity>(),
+                        "Entity cannot be inserted"
+                    );
+
+                    types.insert::<$types>();
+                )+
             }
 
             fn remove(types: &mut TypeMetadataSet) -> Option<()> {
@@ -1004,13 +991,10 @@ mod tests {
 
         let insert_target = &world.insert_map[&(0, TypeId::of::<(i32,)>())];
         assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 0);
         assert_eq!(insert_target.write_types.len(), 1);
 
-        assert_eq!(world.remove_map.len(), 1);
-
-        let remove_target = &world.remove_map[&(1, TypeId::of::<(i32,)>())];
-        assert_eq!(remove_target.archetype, 0);
-        assert_eq!(remove_target.read_types.len(), 1);
+        assert_eq!(world.remove_map.len(), 0);
     }
 
     #[test]
@@ -1053,13 +1037,10 @@ mod tests {
 
         let insert_target = &world.insert_map[&(0, TypeId::of::<(i32, u64)>())];
         assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 0);
         assert_eq!(insert_target.write_types.len(), 2);
 
-        assert_eq!(world.remove_map.len(), 1);
-
-        let remove_target = &world.remove_map[&(1, TypeId::of::<(i32, u64)>())];
-        assert_eq!(remove_target.archetype, 0);
-        assert_eq!(remove_target.read_types.len(), 2);
+        assert_eq!(world.remove_map.len(), 0);
 
         world.remove::<(i32,)>(ent).unwrap();
 
@@ -1073,25 +1054,73 @@ mod tests {
         assert_eq!(world.archetypes[1].len(), 0);
         assert_eq!(world.archetypes[2].len(), 1);
 
-        assert_eq!(world.insert_map.len(), 2);
+        assert_eq!(world.insert_map.len(), 1);
 
         let insert_target = &world.insert_map[&(0, TypeId::of::<(i32, u64)>())];
         assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 0);
         assert_eq!(insert_target.write_types.len(), 2);
 
-        let insert_target = &world.insert_map[&(2, TypeId::of::<(i32,)>())];
-        assert_eq!(insert_target.archetype, 1);
-        assert_eq!(insert_target.write_types.len(), 1);
-
-        assert_eq!(world.remove_map.len(), 2);
-
-        let remove_target = &world.remove_map[&(1, TypeId::of::<(i32, u64)>())];
-        assert_eq!(remove_target.archetype, 0);
-        assert_eq!(remove_target.read_types.len(), 2);
+        assert_eq!(world.remove_map.len(), 1);
 
         let remove_target = &world.remove_map[&(1, TypeId::of::<(i32,)>())];
         assert_eq!(remove_target.archetype, 2);
         assert_eq!(remove_target.read_types.len(), 1);
+    }
+
+    #[test]
+    fn insert_can_be_used_to_overwrite_components() {
+        let mut world = World::new();
+
+        let entity1 = world.alloc();
+        world.insert(entity1, (0,));
+
+        let entity2 = world.alloc();
+
+        world.insert(entity1, (1,));
+        world.insert(entity2, (2,));
+
+        assert_eq!(*world.get::<i32>(entity1).unwrap(), 1);
+        assert_eq!(*world.get::<i32>(entity2).unwrap(), 2);
+
+        assert_eq!(world.insert_map.len(), 2);
+
+        let insert_target = &world.insert_map[&(0, TypeId::of::<(i32,)>())];
+        assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 0);
+        assert_eq!(insert_target.write_types.len(), 1);
+
+        let insert_target = &world.insert_map[&(1, TypeId::of::<(i32,)>())];
+        assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 1);
+        assert_eq!(insert_target.write_types.len(), 1);
+    }
+
+    #[test]
+    fn exchange_can_be_used_to_overwrite_components() {
+        let mut world = World::new();
+
+        let entity = world.alloc();
+        world.insert(entity, (0, true));
+        world.exchange::<(bool,), _>(entity, (1,)).unwrap();
+
+        assert_eq!(*world.get::<i32>(entity).unwrap(), 1);
+        assert!(!world.contains::<bool>(entity));
+
+        assert_eq!(world.insert_map.len(), 1);
+
+        let insert_target = &world.insert_map[&(0, TypeId::of::<(i32, bool)>())];
+        assert_eq!(insert_target.archetype, 1);
+        assert_eq!(insert_target.drop_types.len(), 0);
+        assert_eq!(insert_target.write_types.len(), 2);
+
+        assert_eq!(world.exchange_map.len(), 1);
+
+        let exchange_target = &world.exchange_map[&(1, TypeId::of::<((bool,), (i32,))>())];
+        assert_eq!(exchange_target.archetype, 2);
+        assert_eq!(exchange_target.read_types.len(), 1);
+        assert_eq!(exchange_target.drop_types.len(), 1);
+        assert_eq!(exchange_target.write_types.len(), 1);
     }
 
     #[test]
@@ -1108,6 +1137,7 @@ mod tests {
         let exchange_target = &world.exchange_map[&(1, TypeId::of::<((bool,), (bool,))>())];
         assert_eq!(exchange_target.archetype, 1);
         assert_eq!(exchange_target.read_types.len(), 1);
+        assert_eq!(exchange_target.drop_types.len(), 0);
         assert_eq!(exchange_target.write_types.len(), 1);
     }
 

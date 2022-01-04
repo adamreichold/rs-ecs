@@ -272,6 +272,16 @@ impl Archetype {
 
         ptr.add(idx as usize)
     }
+
+    pub unsafe fn drop(&mut self, ty: u16, idx: u32) {
+        let ty = ty as usize;
+        debug_assert!(ty < self.types.len());
+        let ty = self.types.get_unchecked(ty);
+
+        let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
+
+        (ty.drop)(ptr, 1);
+    }
 }
 
 impl Archetype {
@@ -447,11 +457,8 @@ impl TypeMetadataSet {
     where
         C: 'static,
     {
-        let ty = self.0.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id);
-
-        match ty {
-            Err(ty) => self.0.insert(ty, TypeMetadata::new::<C>()),
-            Ok(_) => panic!("Component {} already present", type_name::<C>()),
+        if let Err(ty) = self.0.binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id) {
+            self.0.insert(ty, TypeMetadata::new::<C>());
         }
     }
 

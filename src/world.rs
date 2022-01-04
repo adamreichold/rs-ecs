@@ -392,10 +392,13 @@ impl World {
     }
 
     unsafe fn move_(&mut self, id: u32, old_ty: u16, new_ty: u16, old_idx: u32) -> u32 {
+        debug_assert!(self.archetypes.len() > old_ty as usize);
+        debug_assert!(self.archetypes.len() > new_ty as usize);
         debug_assert_ne!(old_ty, new_ty);
 
-        let old_archetype = &mut *self.archetypes.as_mut_ptr().add(old_ty as usize);
-        let new_archetype = &mut *self.archetypes.as_mut_ptr().add(new_ty as usize);
+        let archetypes = self.archetypes.as_mut_ptr();
+        let old_archetype = &mut *archetypes.add(old_ty as usize);
+        let new_archetype = &mut *archetypes.add(new_ty as usize);
 
         let new_idx = new_archetype.alloc();
 

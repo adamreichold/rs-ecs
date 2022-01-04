@@ -833,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn adding_component_creates_archetype() {
+    fn inserting_component_creates_archetype() {
         let mut world = World::new();
 
         assert_eq!(world.entities.len(), 0);
@@ -941,9 +941,17 @@ mod tests {
     #[test]
     fn trival_exchange_does_not_create_aliasing_unique_references() {
         let mut world = World::new();
+
         let ent = world.alloc();
         world.insert(ent, (true,));
+
         world.exchange::<(bool,), _>(ent, (false,)).unwrap();
+
+        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(
+            world.exchange_map[&(1, TypeId::of::<((bool,), (bool,))>())],
+            1
+        );
     }
 
     #[test]

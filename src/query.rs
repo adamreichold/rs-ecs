@@ -774,7 +774,9 @@ where
 unsafe impl<F> FetchShared for FetchMatches<F> {}
 
 macro_rules! impl_fetch_for_tuples {
-    () => {};
+    () => {
+        impl_fetch_for_tuples!(@impl);
+    };
 
     ($head:ident $(,$tail:ident)*) => {
         impl_fetch_for_tuples!($($tail),*);
@@ -789,60 +791,61 @@ macro_rules! impl_fetch_for_tuples {
         impl_fetch_for_tuples!(@rev $($tail),*; $head $(,$rev)*);
     };
 
-    (@impl $($types:ident),+) => {
-        impl<$($types),+> QuerySpec for ($($types,)+)
+    (@impl $($types:ident),*) => {
+        impl<$($types),*> QuerySpec for ($($types,)*)
         where
-            $($types: QuerySpec,)+
+            $($types: QuerySpec,)*
         {
-            type Fetch = ($($types::Fetch,)+);
+            type Fetch = ($($types::Fetch,)*);
         }
 
-        unsafe impl<'q, $($types),+> Fetch<'q> for ($($types,)+)
+        #[allow(unused_variables, clippy::unused_unit)]
+        unsafe impl<'q, $($types),*> Fetch<'q> for ($($types,)*)
         where
-            $($types: Fetch<'q>,)+
+            $($types: Fetch<'q>,)*
         {
-            type Ty = ($($types::Ty,)+);
-            type Ref = ($($types::Ref,)+);
-            type Ptr = ($($types::Ptr,)+);
+            type Ty = ($($types::Ty,)*);
+            type Ref = ($($types::Ref,)*);
+            type Ptr = ($($types::Ptr,)*);
 
-            type Item = ($($types::Item,)+);
+            type Item = ($($types::Item,)*);
 
             #[allow(non_snake_case)]
             fn find(archetype: &Archetype) -> Option<Self::Ty> {
-                $(let $types = $types::find(archetype)?;)+
+                $(let $types = $types::find(archetype)?;)*
 
-                Some(($($types,)+))
+                Some(($($types,)*))
             }
 
             #[allow(non_snake_case)]
             unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-                let ($($types,)+) = ty;
+                let ($($types,)*) = ty;
 
-                ($($types::borrow(archetype, $types),)+)
+                ($($types::borrow(archetype, $types),)*)
             }
 
             #[allow(non_snake_case)]
             unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
-                let ($($types,)+) = ty;
+                let ($($types,)*) = ty;
 
-                ($($types::base_pointer(archetype, $types),)+)
+                ($($types::base_pointer(archetype, $types),)*)
             }
 
             fn dangling() -> Self::Ptr {
-                ($($types::dangling(),)+)
+                ($($types::dangling(),)*)
             }
 
             #[allow(non_snake_case)]
             unsafe fn deref(ptr: Self::Ptr, idx: u32) -> Self::Item {
-                let ($($types,)+) = ptr;
+                let ($($types,)*) = ptr;
 
-                ($($types::deref($types, idx),)+)
+                ($($types::deref($types, idx),)*)
             }
         }
 
-        unsafe impl<$($types),+> FetchShared for ($($types,)+)
+        unsafe impl<$($types),*> FetchShared for ($($types,)*)
         where
-            $($types: FetchShared,)+
+            $($types: FetchShared,)*
         {
         }
     };
@@ -1072,6 +1075,17 @@ mod tests {
         for ent in entities {
             query.get_mut(ent).unwrap();
         }
+    }
+
+    #[test]
+    fn empty_queries_yields_unit_for_all_entities() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let res = Query::<()>::new().borrow(&world).iter().collect::<Vec<_>>();
+
+        assert_eq!(res, vec![(), (), ()]);
     }
 
     #[test]

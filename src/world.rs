@@ -1006,6 +1006,16 @@ mod tests {
     }
 
     #[test]
+    fn empty_remove_is_essentially_a_noop() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        world.insert(ent, (true,));
+
+        let () = world.remove::<()>(ent).unwrap();
+    }
+
+    #[test]
     fn trival_exchange_does_not_create_aliasing_unique_references() {
         let mut world = World::new();
 

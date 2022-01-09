@@ -16,7 +16,7 @@ pub struct QueryParIter<'q, S>
 where
     S: QuerySpec,
 {
-    types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+    comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
     archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
@@ -34,16 +34,16 @@ where
     S: QuerySpec,
 {
     pub(crate) fn new(
-        types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+        comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
         archetypes: &'q [Archetype],
     ) -> Self {
-        let len = types
+        let len = comps
             .iter()
             .map(|(idx, _ty)| archetypes[*idx as usize].len())
             .sum();
 
         Self {
-            types,
+            comps,
             archetypes,
             idx: 0,
             len,
@@ -119,7 +119,7 @@ where
         let mut len_back = 0;
         let mut ptr_back = S::Fetch::dangling();
 
-        for (pos, (archetype_idx, ty)) in self.types.iter().enumerate() {
+        for (pos, (archetype_idx, ty)) in self.comps.iter().enumerate() {
             let archetype = &self.archetypes[*archetype_idx as usize];
 
             if archetype.len() == 0 {
@@ -158,10 +158,10 @@ where
             }
         }
 
-        let types = &self.types[first..last];
+        let comps = &self.comps[first..last];
 
         QueryParIterIntoIter {
-            types,
+            comps,
             archetypes: self.archetypes,
             idx,
             len,
@@ -178,7 +178,7 @@ where
     {
         let mut sum = 0;
 
-        for (archetype_idx, ty) in self.types {
+        for (archetype_idx, ty) in self.comps {
             if self.len <= sum {
                 break;
             }
@@ -225,14 +225,14 @@ where
         let mid = self.idx + mid as u32;
 
         let lhs = Self {
-            types: self.types,
+            comps: self.comps,
             archetypes: self.archetypes,
             idx: self.idx,
             len: mid,
         };
 
         let rhs = Self {
-            types: self.types,
+            comps: self.comps,
             archetypes: self.archetypes,
             idx: mid,
             len: self.len,
@@ -246,7 +246,7 @@ pub struct QueryParIterIntoIter<'q, S>
 where
     S: QuerySpec,
 {
-    types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
+    comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)],
     archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
@@ -269,9 +269,9 @@ where
                 self.idx += 1;
                 return Some(val);
             } else {
-                match self.types.split_first() {
+                match self.comps.split_first() {
                     Some(((idx, ty), rest)) => {
-                        self.types = rest;
+                        self.comps = rest;
 
                         let archetype = &self.archetypes[*idx as usize];
                         self.idx = 0;
@@ -309,9 +309,9 @@ where
                 self.len_back -= 1;
                 return Some(val);
             } else {
-                match self.types.split_last() {
+                match self.comps.split_last() {
                     Some(((idx, ty), rest)) => {
-                        self.types = rest;
+                        self.comps = rest;
 
                         let archetype = &self.archetypes[*idx as usize];
                         self.idx_back = 0;
@@ -339,7 +339,7 @@ where
 {
     fn len(&self) -> usize {
         let len = self
-            .types
+            .comps
             .iter()
             .map(|(idx, _)| self.archetypes[*idx as usize].len())
             .sum::<u32>()

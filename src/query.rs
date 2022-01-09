@@ -1,12 +1,13 @@
 use std::any::TypeId;
 use std::iter::FusedIterator;
 use std::marker::PhantomData;
-use std::mem::{transmute, ManuallyDrop};
+use std::mem::{transmute, transmute_copy};
 use std::ptr::NonNull;
 use std::slice::Iter;
 
 use crate::{
-    archetype::{Archetype, Ref, RefMut},
+    archetype::Archetype,
+    borrow_flags::{BorrowFlags, Ref, RefMut},
     world::{Entity, EntityMetadata, World},
 };
 
@@ -96,8 +97,8 @@ where
     S: QuerySpec,
 {
     tag_gen: (u32, u16),
-    types: Box<[(u16, <S::Fetch as Fetch<'static>>::Ty)]>,
-    refs: Vec<ManuallyDrop<<S::Fetch as Fetch<'static>>::Ref>>,
+    flags: Option<<S::Fetch as Fetch<'static>>::Ty>,
+    comps: Box<[(u16, <S::Fetch as Fetch<'static>>::Ty)]>,
     ptrs: Box<[Option<<S::Fetch as Fetch<'static>>::Ptr>]>,
 }
 
@@ -131,8 +132,8 @@ where
     pub fn new() -> Self {
         Self {
             tag_gen: Default::default(),
-            types: Default::default(),
-            refs: Default::default(),
+            flags: Default::default(),
+            comps: Default::default(),
             ptrs: Default::default(),
         }
     }
@@ -156,34 +157,30 @@ where
             self.find(world);
         }
 
-        self.refs.clear();
+        let _ref = self
+            .flags
+            .map(|ty| unsafe { S::Fetch::borrow(&world.borrow_flags, transmute_copy(&ty)) });
 
-        let ref_ = QueryRef {
+        QueryRef {
             world,
-            types: unsafe { transmute(&*self.types) },
-            refs: unsafe { transmute(&mut self.refs) },
+            _ref,
+            comps: unsafe { transmute(&*self.comps) },
             ptrs: unsafe { transmute(&mut *self.ptrs) },
-        };
-
-        for (idx, ty) in ref_.types {
-            let archetype = &world.archetypes[*idx as usize];
-
-            if archetype.len() != 0 {
-                ref_.refs.push(unsafe { S::Fetch::borrow(archetype, *ty) });
-            }
         }
-
-        ref_
     }
 
     #[cold]
     #[inline(never)]
     fn find(&mut self, world: &World) {
-        self.types = world
+        self.flags = S::Fetch::find_flags(&world.borrow_flags);
+
+        self.comps = world
             .archetypes
             .iter()
             .enumerate()
-            .filter_map(|(idx, archetype)| S::Fetch::find(archetype).map(|ty| (idx as u16, ty)))
+            .filter_map(|(idx, archetype)| {
+                S::Fetch::find_comps(archetype).map(|ty| (idx as u16, ty))
+            })
             .collect();
 
         self.ptrs = world.archetypes.iter().map(|_| None).collect();
@@ -198,8 +195,8 @@ where
     S: QuerySpec,
 {
     world: &'w World,
-    types: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)],
-    refs: &'w mut Vec<<S::Fetch as Fetch<'w>>::Ref>,
+    _ref: Option<<S::Fetch as Fetch<'w>>::Ref>,
+    comps: &'w [(u16, <S::Fetch as Fetch<'w>>::Ty)],
     ptrs: &'w mut [Option<<S::Fetch as Fetch<'w>>::Ptr>],
 }
 
@@ -212,9 +209,9 @@ where
     where
         F: FnMut(<S::Fetch as Fetch<'q>>::Item),
     {
-        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.comps) };
 
-        for (idx, ty) in types {
+        for (idx, ty) in comps {
             let archetype = &self.world.archetypes[*idx as usize];
 
             let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
@@ -229,10 +226,10 @@ where
 
     /// Create an iterator over the entities matching the query.
     pub fn iter<'q>(&'q mut self) -> QueryIter<'q, S> {
-        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.comps) };
 
         QueryIter {
-            types: types.iter(),
+            comps: comps.iter(),
             archetypes: &self.world.archetypes,
             idx: 0,
             len: 0,
@@ -247,9 +244,9 @@ where
         <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
         <S::Fetch as Fetch<'q>>::Item: Send,
     {
-        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.comps) };
 
-        QueryParIter::new(types, &self.world.archetypes)
+        QueryParIter::new(comps, &self.world.archetypes)
     }
 
     /// Create a map of the entities matching the query.
@@ -275,14 +272,14 @@ where
     /// assert_eq!(*f, 1.0);
     /// ```
     pub fn map<'q>(&'q mut self) -> QueryMap<'q, S> {
-        let types: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.types) };
+        let comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.comps) };
 
         let ptrs: &'q mut [Option<<S::Fetch as Fetch<'q>>::Ptr>] =
             unsafe { transmute(&mut *self.ptrs) };
 
         ptrs.fill(None);
 
-        for (idx, ty) in types {
+        for (idx, ty) in comps {
             let archetype = &self.world.archetypes[*idx as usize];
 
             let ptr = unsafe { S::Fetch::base_pointer(archetype, *ty) };
@@ -297,21 +294,12 @@ where
     }
 }
 
-impl<S> Drop for QueryRef<'_, S>
-where
-    S: QuerySpec,
-{
-    fn drop(&mut self) {
-        self.refs.clear();
-    }
-}
-
 /// Used to iterate through the entities which match a certain [Query].
 pub struct QueryIter<'q, S>
 where
     S: QuerySpec,
 {
-    types: Iter<'q, (u16, <S::Fetch as Fetch<'q>>::Ty)>,
+    comps: Iter<'q, (u16, <S::Fetch as Fetch<'q>>::Ty)>,
     archetypes: &'q [Archetype],
     idx: u32,
     len: u32,
@@ -331,7 +319,7 @@ where
                 self.idx += 1;
                 return Some(val);
             } else {
-                let (idx, ty) = self.types.next()?;
+                let (idx, ty) = self.comps.next()?;
                 let archetype = &self.archetypes[*idx as usize];
                 self.idx = 0;
                 self.len = archetype.len();
@@ -352,7 +340,7 @@ where
 {
     fn len(&self) -> usize {
         let len = self
-            .types
+            .comps
             .clone()
             .map(|(idx, _)| self.archetypes[*idx as usize].len())
             .sum::<u32>()
@@ -442,8 +430,9 @@ pub unsafe trait Fetch<'q> {
 
     type Item;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty>;
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref;
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty>;
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty>;
+    unsafe fn borrow(borrows: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref;
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr;
 
     fn dangling() -> Self::Ptr;
@@ -472,12 +461,16 @@ where
 
     type Item = &'q C;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+        borrow_flags.find::<C>()
+    }
+
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
         archetype.find::<C>()
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-        archetype.borrow::<C>(ty)
+    unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
+        borrow_flags.borrow::<C>(ty)
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
@@ -514,18 +507,22 @@ where
 
     type Item = &'q mut C;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
         assert_ne!(
             TypeId::of::<C>(),
             TypeId::of::<Entity>(),
             "Entity cannot be queried mutably"
         );
 
+        borrow_flags.find::<C>()
+    }
+
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
         archetype.find::<C>()
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-        archetype.borrow_mut::<C>(ty)
+    unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
+        borrow_flags.borrow_mut::<C>(ty)
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
@@ -560,12 +557,16 @@ where
 
     type Item = Option<F::Item>;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        Some(F::find(archetype))
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+        Some(F::find_flags(borrow_flags))
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-        ty.map(|ty| F::borrow(archetype, ty))
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
+        Some(F::find_comps(archetype))
+    }
+
+    unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
+        ty.map(|ty| F::borrow(borrow_flags, ty))
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
@@ -618,15 +619,22 @@ where
 
     type Item = F::Item;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        match archetype.find::<C>() {
-            Some(_) => F::find(archetype),
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+        match borrow_flags.find::<C>() {
+            Some(_) => F::find_flags(borrow_flags),
             None => None,
         }
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-        F::borrow(archetype, ty)
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
+        match archetype.find::<C>() {
+            Some(_) => F::find_comps(archetype),
+            None => None,
+        }
+    }
+
+    unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
+        F::borrow(borrow_flags, ty)
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
@@ -678,15 +686,22 @@ where
 
     type Item = F::Item;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        match archetype.find::<C>() {
-            None => F::find(archetype),
+    fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+        match borrow_flags.find::<C>() {
+            None => F::find_flags(borrow_flags),
             Some(_) => None,
         }
     }
 
-    unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
-        F::borrow(archetype, ty)
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
+        match archetype.find::<C>() {
+            None => F::find_comps(archetype),
+            Some(_) => None,
+        }
+    }
+
+    unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
+        F::borrow(borrow_flags, ty)
     }
 
     unsafe fn base_pointer(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
@@ -752,11 +767,15 @@ where
 
     type Item = bool;
 
-    fn find(archetype: &Archetype) -> Option<Self::Ty> {
-        Some(F::find(archetype).is_some())
+    fn find_flags(_borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+        Some(false)
     }
 
-    unsafe fn borrow(_archetype: &'q Archetype, _ty: Self::Ty) -> Self::Ref {}
+    fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
+        Some(F::find_comps(archetype).is_some())
+    }
+
+    unsafe fn borrow(_borrow_flags: &'q BorrowFlags, _ty: Self::Ty) -> Self::Ref {}
 
     unsafe fn base_pointer(_archetype: &'q Archetype, ty: Self::Ty) -> Self::Ptr {
         ty
@@ -811,17 +830,24 @@ macro_rules! impl_fetch_for_tuples {
             type Item = ($($types::Item,)*);
 
             #[allow(non_snake_case)]
-            fn find(archetype: &Archetype) -> Option<Self::Ty> {
-                $(let $types = $types::find(archetype)?;)*
+            fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
+                $(let $types = $types::find_flags(borrow_flags)?;)*
 
                 Some(($($types,)*))
             }
 
             #[allow(non_snake_case)]
-            unsafe fn borrow(archetype: &'q Archetype, ty: Self::Ty) -> Self::Ref {
+            fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
+                $(let $types = $types::find_comps(archetype)?;)*
+
+                Some(($($types,)*))
+            }
+
+            #[allow(non_snake_case)]
+            unsafe fn borrow(borrow_flags: &'q BorrowFlags, ty: Self::Ty) -> Self::Ref {
                 let ($($types,)*) = ty;
 
-                ($($types::borrow(archetype, $types),)*)
+                ($($types::borrow(borrow_flags, $types),)*)
             }
 
             #[allow(non_snake_case)]

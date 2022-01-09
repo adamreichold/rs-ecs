@@ -28,15 +28,15 @@
 #![warn(missing_docs)]
 
 mod archetype;
+mod borrow_flags;
 mod query;
 mod resources;
 mod world;
 
 pub use crate::{
-    archetype::{Comp, CompMut},
     query::{Matches, Query, QueryIter, QueryMap, QueryRef, QuerySpec, With, Without},
     resources::{Res, ResMut, Resources},
-    world::{Entity, World},
+    world::{Comp, CompMut, Entity, World},
 };
 
 #[cfg(feature = "rayon")]

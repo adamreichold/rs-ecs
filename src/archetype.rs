@@ -1,9 +1,7 @@
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use std::any::{type_name, TypeId};
-use std::cell::UnsafeCell;
+use std::any::TypeId;
 use std::cmp::Reverse;
 use std::mem::{align_of, needs_drop};
-use std::ops::{Deref, DerefMut};
 use std::ptr::{copy_nonoverlapping, drop_in_place};
 use std::slice::from_raw_parts_mut;
 
@@ -233,26 +231,6 @@ impl Archetype {
         ty
     }
 
-    pub unsafe fn borrow<C>(&self, ty: u16) -> Ref<'_>
-    where
-        C: 'static,
-    {
-        let ty = self.type_metadata::<C>(ty);
-
-        Ref::new(&ty.borrow)
-            .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
-    }
-
-    pub unsafe fn borrow_mut<C>(&self, ty: u16) -> RefMut<'_>
-    where
-        C: 'static,
-    {
-        let ty = self.type_metadata::<C>(ty);
-
-        RefMut::new(&ty.borrow)
-            .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
-    }
-
     pub unsafe fn base_pointer<C>(&self, ty: u16) -> *mut C
     where
         C: 'static,
@@ -275,6 +253,14 @@ impl Archetype {
 }
 
 impl Archetype {
+    pub unsafe fn get<C>(&self, idx: u32) -> *mut C
+    where
+        C: 'static,
+    {
+        let ty = self.find::<C>().unwrap();
+        self.pointer::<C>(ty, idx)
+    }
+
     pub unsafe fn drop<C>(&mut self, idx: u32)
     where
         C: 'static,
@@ -291,150 +277,12 @@ impl Archetype {
     }
 }
 
-impl Archetype {
-    pub unsafe fn get_raw<C>(&mut self, idx: u32) -> *mut C
-    where
-        C: 'static,
-    {
-        let ty = self.find::<C>().unwrap();
-        self.pointer::<C>(ty, idx)
-    }
-
-    pub unsafe fn get<C>(&self, idx: u32) -> Option<Comp<'_, C>>
-    where
-        C: 'static,
-    {
-        let ty = self.find::<C>()?;
-        let _ref = self.borrow::<C>(ty);
-        let ptr = self.pointer::<C>(ty, idx);
-
-        let val = &*ptr;
-
-        Some(Comp { _ref, val })
-    }
-
-    pub unsafe fn get_mut<C>(&self, idx: u32) -> Option<CompMut<'_, C>>
-    where
-        C: 'static,
-    {
-        let ty = self.find::<C>()?;
-        let _ref = self.borrow_mut::<C>(ty);
-        let ptr = self.pointer::<C>(ty, idx);
-
-        let val = &mut *ptr;
-
-        Some(CompMut { _ref, val })
-    }
-}
-
-/// An immutable borrow of a component.
-pub struct Comp<'a, C> {
-    _ref: Ref<'a>,
-    val: &'a C,
-}
-
-impl<C> Deref for Comp<'_, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.val
-    }
-}
-
-/// A mutable borrow of a component.
-pub struct CompMut<'a, C> {
-    _ref: RefMut<'a>,
-    val: &'a mut C,
-}
-
-impl<C> Deref for CompMut<'_, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        self.val
-    }
-}
-
-impl<C> DerefMut for CompMut<'_, C> {
-    fn deref_mut(&mut self) -> &mut C {
-        self.val
-    }
-}
-
-pub struct Ref<'a>(&'a UnsafeCell<isize>);
-
-impl<'a> Ref<'a> {
-    fn new(borrow: &'a UnsafeCell<isize>) -> Option<Self> {
-        let readers = unsafe { &mut *borrow.get() };
-
-        let new_readers = readers.wrapping_add(1);
-
-        if new_readers <= 0 {
-            cold();
-            return None;
-        }
-
-        *readers = new_readers;
-
-        Some(Self(borrow))
-    }
-}
-
-impl Drop for Ref<'_> {
-    fn drop(&mut self) {
-        unsafe {
-            *self.0.get() -= 1;
-        }
-    }
-}
-
-pub struct RefMut<'a>(&'a UnsafeCell<isize>);
-
-impl<'a> RefMut<'a> {
-    fn new(borrow: &'a UnsafeCell<isize>) -> Option<Self> {
-        let writers = unsafe { &mut *borrow.get() };
-
-        if *writers != 0 {
-            cold();
-            return None;
-        }
-
-        *writers = -1;
-
-        Some(Self(borrow))
-    }
-}
-
-impl Drop for RefMut<'_> {
-    fn drop(&mut self) {
-        unsafe {
-            *self.0.get() = 0;
-        }
-    }
-}
-
-#[cold]
-#[inline(always)]
-fn cold() {}
-
+#[derive(Clone, Copy)]
 struct TypeMetadata {
     id: TypeId,
     layout: Layout,
     drop: unsafe fn(*mut u8, usize),
     base_pointer: *mut u8,
-    borrow: UnsafeCell<isize>,
-}
-
-impl Clone for TypeMetadata {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            layout: self.layout,
-            drop: self.drop,
-            base_pointer: self.layout.align() as *mut u8,
-            borrow: Default::default(),
-        }
-    }
 }
 
 impl TypeMetadata {
@@ -451,7 +299,6 @@ impl TypeMetadata {
             layout: Layout::new::<C>(),
             drop: drop::<C>,
             base_pointer: align_of::<C>() as *mut u8,
-            borrow: Default::default(),
         }
     }
 }
@@ -460,6 +307,10 @@ impl TypeMetadata {
 pub struct TypeMetadataSet(Vec<TypeMetadata>);
 
 impl TypeMetadataSet {
+    pub fn ids(&self) -> impl ExactSizeIterator<Item = TypeId> + '_ {
+        self.0.iter().map(|ty| ty.id)
+    }
+
     pub fn insert<C>(&mut self)
     where
         C: 'static,
@@ -554,7 +405,7 @@ mod tests {
                 let ent = archetype.alloc();
 
                 archetype
-                    .get_raw::<CountDrops>(ent)
+                    .get::<CountDrops>(ent)
                     .write(CountDrops(drops.clone()));
             }
         }

@@ -3,15 +3,20 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::archetype::{Archetype, Comp, CompMut, TypeMetadataSet};
+use crate::{
+    archetype::{Archetype, TypeMetadataSet},
+    borrow_flags::{BorrowFlags, Ref, RefMut},
+};
 
 /// The world storing entities and their components.
 pub struct World {
     tag: u32,
     pub(crate) entities: Vec<EntityMetadata>,
     free_list: Vec<u32>,
+    pub(crate) borrow_flags: BorrowFlags,
     pub(crate) archetypes: Vec<Archetype>,
     insert_map: IndexTypeIdMap<u16>,
     remove_map: IndexTypeIdMap<u16>,
@@ -32,11 +37,17 @@ impl World {
         let mut empty_archetype = TypeMetadataSet::default();
         empty_archetype.insert::<Entity>();
 
+        let mut borrow_flags = BorrowFlags::default();
+        borrow_flags.insert(&empty_archetype);
+
+        let archetypes = vec![Archetype::new(empty_archetype)];
+
         Self {
             tag: tag(),
             entities: Default::default(),
             free_list: Default::default(),
-            archetypes: vec![Archetype::new(empty_archetype)],
+            borrow_flags,
+            archetypes,
             insert_map: Default::default(),
             remove_map: Default::default(),
             exchange_map: Default::default(),
@@ -79,7 +90,7 @@ impl World {
         let ent = Entity { id, gen: meta.gen };
 
         unsafe {
-            self.archetypes[0].get_raw::<Entity>(meta.idx).write(ent);
+            self.archetypes[0].get::<Entity>(meta.idx).write(ent);
         }
 
         ent
@@ -131,7 +142,7 @@ impl World {
     ) {
         unsafe {
             if archetype.free::<DROP>(idx) {
-                let swapped_ent = archetype.get_raw::<Entity>(idx).read();
+                let swapped_ent = archetype.get::<Entity>(idx).read();
 
                 entities[swapped_ent.id as usize].idx = idx;
             }
@@ -183,6 +194,7 @@ impl World {
         } else {
             Self::insert_cold(
                 &mut self.archetypes,
+                &mut self.borrow_flags,
                 &mut self.insert_map,
                 key,
                 B::insert,
@@ -206,6 +218,7 @@ impl World {
     #[inline(never)]
     fn insert_cold(
         archetypes: &mut Vec<Archetype>,
+        borrow_flags: &mut BorrowFlags,
         insert_map: &mut IndexTypeIdMap<u16>,
         key: TypeId,
         insert: fn(&mut TypeMetadataSet),
@@ -214,7 +227,7 @@ impl World {
         let mut types = archetypes[old_ty as usize].types();
         insert(&mut types);
 
-        let new_ty = Self::get_or_insert(archetypes, types);
+        let new_ty = Self::get_or_insert(archetypes, borrow_flags, types);
 
         insert_map.insert((old_ty, key), new_ty);
 
@@ -249,6 +262,7 @@ impl World {
         } else {
             Self::remove_cold(
                 &mut self.archetypes,
+                &mut self.borrow_flags,
                 &mut self.remove_map,
                 key,
                 B::remove,
@@ -272,6 +286,7 @@ impl World {
     #[inline(never)]
     fn remove_cold(
         archetypes: &mut Vec<Archetype>,
+        borrow_flags: &mut BorrowFlags,
         remove_map: &mut IndexTypeIdMap<u16>,
         key: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
@@ -280,7 +295,7 @@ impl World {
         let mut types = archetypes[old_ty as usize].types();
         remove(&mut types)?;
 
-        let new_ty = Self::get_or_insert(archetypes, types);
+        let new_ty = Self::get_or_insert(archetypes, borrow_flags, types);
 
         remove_map.insert((old_ty, key), new_ty);
 
@@ -321,6 +336,7 @@ impl World {
         } else {
             Self::exchange_cold(
                 &mut self.archetypes,
+                &mut self.borrow_flags,
                 &mut self.exchange_map,
                 key,
                 B1::remove,
@@ -351,6 +367,7 @@ impl World {
     #[inline(never)]
     fn exchange_cold(
         archetypes: &mut Vec<Archetype>,
+        borrow_flags: &mut BorrowFlags,
         exchange_map: &mut IndexTypeIdMap<u16>,
         key: TypeId,
         remove: fn(&mut TypeMetadataSet) -> Option<()>,
@@ -361,14 +378,18 @@ impl World {
         remove(&mut types)?;
         insert(&mut types);
 
-        let new_ty = Self::get_or_insert(archetypes, types);
+        let new_ty = Self::get_or_insert(archetypes, borrow_flags, types);
 
         exchange_map.insert((old_ty, key), new_ty);
 
         Some(new_ty)
     }
 
-    fn get_or_insert(archetypes: &mut Vec<Archetype>, types: TypeMetadataSet) -> u16 {
+    fn get_or_insert(
+        archetypes: &mut Vec<Archetype>,
+        borrow_flags: &mut BorrowFlags,
+        types: TypeMetadataSet,
+    ) -> u16 {
         let pos = archetypes
             .iter_mut()
             .position(|archetype| archetype.match_(&types));
@@ -378,6 +399,8 @@ impl World {
         } else {
             let len = archetypes.len();
             assert!(len < u16::MAX as usize);
+
+            borrow_flags.insert(&types);
 
             archetypes.push(Archetype::new(types));
 
@@ -450,6 +473,7 @@ impl World {
             Self::transfer_cold(
                 &self.archetypes,
                 &mut other.archetypes,
+                &mut other.borrow_flags,
                 &mut self.transfer_map,
                 &mut other.transfer_map,
                 self.tag,
@@ -478,18 +502,20 @@ impl World {
 
         unsafe {
             other.archetypes[new_meta.ty as usize]
-                .get_raw::<Entity>(new_meta.idx)
+                .get::<Entity>(new_meta.idx)
                 .write(ent);
         }
 
         ent
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[cold]
     #[inline(never)]
     fn transfer_cold(
         archetypes: &[Archetype],
         other_archetypes: &mut Vec<Archetype>,
+        other_borrows: &mut BorrowFlags,
         transfer_map: &mut IndexTagMap<u16>,
         other_transfer_map: &mut IndexTagMap<u16>,
         tag: u32,
@@ -498,7 +524,7 @@ impl World {
     ) -> u16 {
         let types = archetypes[old_ty as usize].types();
 
-        let new_ty = Self::get_or_insert(other_archetypes, types);
+        let new_ty = Self::get_or_insert(other_archetypes, other_borrows, types);
 
         transfer_map.insert((old_ty, other_tag), new_ty);
         other_transfer_map.insert((new_ty, tag), old_ty);
@@ -572,7 +598,15 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        unsafe { self.archetypes[meta.ty as usize].get::<C>(meta.idx) }
+        let archetype = &self.archetypes[meta.ty as usize];
+        let comp = archetype.find::<C>()?;
+
+        let flag = self.borrow_flags.find::<C>()?;
+        let _ref = unsafe { self.borrow_flags.borrow::<C>(flag) };
+
+        let val = unsafe { &*archetype.pointer::<C>(comp, meta.idx) };
+
+        Some(Comp { _ref, val })
     }
 
     /// Get a mutable reference to the component of the given type for an [Entity].
@@ -603,7 +637,15 @@ impl World {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        unsafe { self.archetypes[meta.ty as usize].get_mut::<C>(meta.idx) }
+        let archetype = &self.archetypes[meta.ty as usize];
+        let comp = archetype.find::<C>()?;
+
+        let flag = self.borrow_flags.find::<C>()?;
+        let _ref = unsafe { self.borrow_flags.borrow_mut::<C>(flag) };
+
+        let val = unsafe { &mut *archetype.pointer::<C>(comp, meta.idx) };
+
+        Some(CompMut { _ref, val })
     }
 }
 
@@ -634,6 +676,40 @@ impl Default for EntityMetadata {
 impl EntityMetadata {
     fn bump_gen(&mut self) {
         self.gen = unsafe { NonZeroU32::new_unchecked(self.gen.get().checked_add(1).unwrap()) };
+    }
+}
+
+/// An immutable borrow of a component.
+pub struct Comp<'a, C> {
+    _ref: Ref<'a>,
+    val: &'a C,
+}
+
+impl<C> Deref for Comp<'_, C> {
+    type Target = C;
+
+    fn deref(&self) -> &C {
+        self.val
+    }
+}
+
+/// A mutable borrow of a component.
+pub struct CompMut<'a, C> {
+    _ref: RefMut<'a>,
+    val: &'a mut C,
+}
+
+impl<C> Deref for CompMut<'_, C> {
+    type Target = C;
+
+    fn deref(&self) -> &C {
+        self.val
+    }
+}
+
+impl<C> DerefMut for CompMut<'_, C> {
+    fn deref_mut(&mut self) -> &mut C {
+        self.val
     }
 }
 
@@ -735,13 +811,13 @@ macro_rules! impl_bundle_for_tuples {
             #[allow(non_snake_case)]
             unsafe fn write(self, archetype: &mut Archetype, idx: u32) {
                 let ($($types,)*) = self;
-                $(archetype.get_raw::<$types>(idx).write($types);)*
+                $(archetype.get::<$types>(idx).write($types);)*
             }
 
             #[allow(non_snake_case)]
             #[allow(clippy::unused_unit)]
             unsafe fn read(archetype: &mut Archetype, idx: u32) -> Self {
-                $(let $types = archetype.get_raw::<$types>(idx).read();)*
+                $(let $types = archetype.get::<$types>(idx).read();)*
                 ($($types,)*)
             }
         }

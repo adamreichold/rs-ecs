@@ -620,10 +620,7 @@ where
     type Item = F::Item;
 
     fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
-        match borrow_flags.find::<C>() {
-            Some(_) => F::find_flags(borrow_flags),
-            None => None,
-        }
+        F::find_flags(borrow_flags)
     }
 
     fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {
@@ -687,10 +684,7 @@ where
     type Item = F::Item;
 
     fn find_flags(borrow_flags: &BorrowFlags) -> Option<Self::Ty> {
-        match borrow_flags.find::<C>() {
-            None => F::find_flags(borrow_flags),
-            Some(_) => None,
-        }
+        F::find_flags(borrow_flags)
     }
 
     fn find_comps(archetype: &Archetype) -> Option<Self::Ty> {

@@ -18,8 +18,6 @@ pub struct World {
     free_list: Vec<u32>,
     pub(crate) borrow_flags: BorrowFlags,
     pub(crate) archetypes: Vec<Archetype>,
-    insert_map: IndexTypeIdMap<u16>,
-    remove_map: IndexTypeIdMap<u16>,
     exchange_map: IndexTypeIdMap<u16>,
     transfer_map: IndexTagMap<u16>,
 }
@@ -48,8 +46,6 @@ impl World {
             free_list: Default::default(),
             borrow_flags,
             archetypes,
-            insert_map: Default::default(),
-            remove_map: Default::default(),
             exchange_map: Default::default(),
             transfer_map: Default::default(),
         }
@@ -184,54 +180,7 @@ impl World {
     where
         B: Bundle,
     {
-        let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen, "Entity is stale");
-
-        let key = TypeId::of::<B>();
-
-        let new_ty = if let Some(ty) = self.insert_map.get(&(meta.ty, key)) {
-            *ty
-        } else {
-            Self::insert_cold(
-                &mut self.archetypes,
-                &mut self.borrow_flags,
-                &mut self.insert_map,
-                key,
-                B::insert,
-                meta.ty,
-            )
-        };
-
-        let old_ty = meta.ty;
-        let old_idx = meta.idx;
-
-        unsafe {
-            B::drop::<()>(&mut self.archetypes[old_ty as usize], old_idx);
-
-            let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
-
-            comps.write(&mut self.archetypes[new_ty as usize], new_idx);
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn insert_cold(
-        archetypes: &mut Vec<Archetype>,
-        borrow_flags: &mut BorrowFlags,
-        insert_map: &mut IndexTypeIdMap<u16>,
-        key: TypeId,
-        insert: fn(&mut TypeMetadataSet),
-        old_ty: u16,
-    ) -> u16 {
-        let mut types = archetypes[old_ty as usize].types();
-        insert(&mut types);
-
-        let new_ty = Self::get_or_insert(archetypes, borrow_flags, types);
-
-        insert_map.insert((old_ty, key), new_ty);
-
-        new_ty
+        self.exchange::<(), B>(ent, comps);
     }
 
     /// Remove components for a given [Entity].
@@ -252,54 +201,7 @@ impl World {
     where
         B: Bundle,
     {
-        let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen, "Entity is stale");
-
-        let key = TypeId::of::<B>();
-
-        let new_ty = if let Some(ty) = self.remove_map.get(&(meta.ty, key)) {
-            *ty
-        } else {
-            Self::remove_cold(
-                &mut self.archetypes,
-                &mut self.borrow_flags,
-                &mut self.remove_map,
-                key,
-                B::remove,
-                meta.ty,
-            )?
-        };
-
-        let old_ty = meta.ty;
-        let old_idx = meta.idx;
-
-        unsafe {
-            let comps = B::read(&mut self.archetypes[old_ty as usize], old_idx);
-
-            self.move_(ent.id, old_ty, new_ty, old_idx);
-
-            Some(comps)
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn remove_cold(
-        archetypes: &mut Vec<Archetype>,
-        borrow_flags: &mut BorrowFlags,
-        remove_map: &mut IndexTypeIdMap<u16>,
-        key: TypeId,
-        remove: fn(&mut TypeMetadataSet) -> Option<()>,
-        old_ty: u16,
-    ) -> Option<u16> {
-        let mut types = archetypes[old_ty as usize].types();
-        remove(&mut types)?;
-
-        let new_ty = Self::get_or_insert(archetypes, borrow_flags, types);
-
-        remove_map.insert((old_ty, key), new_ty);
-
-        Some(new_ty)
+        self.exchange::<B, ()>(ent, ())
     }
 
     /// Exchange components for a given [Entity]
@@ -955,7 +857,7 @@ mod tests {
         assert_eq!(world.archetypes.len(), 1);
         assert_eq!(world.archetypes[0].len(), 0);
 
-        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.exchange_map.len(), 0);
 
         let ent = world.alloc();
 
@@ -967,7 +869,7 @@ mod tests {
         assert_eq!(world.archetypes.len(), 1);
         assert_eq!(world.archetypes[0].len(), 1);
 
-        assert_eq!(world.insert_map.len(), 0);
+        assert_eq!(world.exchange_map.len(), 0);
 
         world.insert(ent, (23_i32,));
 
@@ -980,8 +882,8 @@ mod tests {
         assert_eq!(world.archetypes[0].len(), 0);
         assert_eq!(world.archetypes[1].len(), 1);
 
-        assert_eq!(world.insert_map.len(), 1);
-        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32,)>())], 1);
+        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(world.exchange_map[&(0, TypeId::of::<((), (i32,))>())], 1);
     }
 
     #[test]
@@ -993,8 +895,7 @@ mod tests {
         assert_eq!(world.archetypes.len(), 1);
         assert_eq!(world.archetypes[0].len(), 0);
 
-        assert_eq!(world.insert_map.len(), 0);
-        assert_eq!(world.remove_map.len(), 0);
+        assert_eq!(world.exchange_map.len(), 0);
 
         let ent = world.alloc();
 
@@ -1009,7 +910,11 @@ mod tests {
         assert_eq!(world.archetypes[0].len(), 0);
         assert_eq!(world.archetypes[1].len(), 1);
 
-        assert_eq!(world.remove_map.len(), 0);
+        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(
+            world.exchange_map[&(0, TypeId::of::<((), (i32, u64))>())],
+            1
+        );
 
         world.remove::<(i32,)>(ent).unwrap();
 
@@ -1023,8 +928,12 @@ mod tests {
         assert_eq!(world.archetypes[1].len(), 0);
         assert_eq!(world.archetypes[2].len(), 1);
 
-        assert_eq!(world.remove_map.len(), 1);
-        assert_eq!(world.remove_map[&(1, TypeId::of::<(i32,)>())], 2);
+        assert_eq!(world.exchange_map.len(), 2);
+        assert_eq!(
+            world.exchange_map[&(0, TypeId::of::<((), (i32, u64))>())],
+            1
+        );
+        assert_eq!(world.exchange_map[&(1, TypeId::of::<((i32,), ())>())], 2);
     }
 
     #[test]
@@ -1046,9 +955,15 @@ mod tests {
         assert_eq!(*world.get::<i32>(entity1).unwrap(), 1);
         assert_eq!(*world.get::<i32>(entity2).unwrap(), 2);
 
-        assert_eq!(world.insert_map.len(), 2);
-        assert_eq!(world.insert_map[&(0, TypeId::of::<(i32, SetOnDrop)>())], 1);
-        assert_eq!(world.insert_map[&(1, TypeId::of::<(i32, SetOnDrop)>())], 1);
+        assert_eq!(world.exchange_map.len(), 2);
+        assert_eq!(
+            world.exchange_map[&(0, TypeId::of::<((), (i32, SetOnDrop))>())],
+            1
+        );
+        assert_eq!(
+            world.exchange_map[&(1, TypeId::of::<((), (i32, SetOnDrop))>())],
+            1
+        );
 
         assert!(drop1.get());
         assert!(!drop2.get());
@@ -1071,7 +986,11 @@ mod tests {
         assert_eq!(*world.get::<i32>(entity).unwrap(), 1);
         assert!(!world.contains::<bool>(entity));
 
-        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(world.exchange_map.len(), 2);
+        assert_eq!(
+            world.exchange_map[&(0, TypeId::of::<((), (i32, bool, SetOnDrop))>())],
+            1
+        );
         assert_eq!(
             world.exchange_map[&(1, TypeId::of::<((bool,), (i32, SetOnDrop))>())],
             2
@@ -1100,7 +1019,8 @@ mod tests {
 
         world.exchange::<(bool,), _>(ent, (false,)).unwrap();
 
-        assert_eq!(world.exchange_map.len(), 1);
+        assert_eq!(world.exchange_map.len(), 2);
+        assert_eq!(world.exchange_map[&(0, TypeId::of::<((), (bool,))>())], 1);
         assert_eq!(
             world.exchange_map[&(1, TypeId::of::<((bool,), (bool,))>())],
             1

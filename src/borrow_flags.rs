@@ -21,29 +21,39 @@ impl BorrowFlags {
     where
         C: 'static,
     {
+        self.find_impl(&TypeId::of::<C>())
+    }
+
+    fn find_impl(&self, key: &TypeId) -> Option<u16> {
         self.0
-            .binary_search_by_key(&TypeId::of::<C>(), |(id, _)| *id)
+            .binary_search_by_key(key, |(id, _)| *id)
             .map(|idx| idx as u16)
             .ok()
     }
 
-    unsafe fn flag<C>(&self, ty: u16) -> &UnsafeCell<isize>
+    #[cfg(debug_assertions)]
+    fn flag<C>(&self, ty: u16) -> &UnsafeCell<isize>
     where
         C: 'static,
     {
-        let ty = ty as usize;
-        debug_assert!(ty < self.0.len());
-        let (id, flag) = self.0.get_unchecked(ty);
-        debug_assert_eq!(id, &TypeId::of::<C>());
-
+        let (id, flag) = &self.0[ty as usize];
+        assert_eq!(id, &TypeId::of::<C>());
         flag
+    }
+
+    #[cfg(not(debug_assertions))]
+    unsafe fn flag_unchecked(&self, ty: u16) -> &UnsafeCell<isize> {
+        &self.0.get_unchecked(ty as usize).1
     }
 
     pub unsafe fn borrow<C>(&self, ty: u16) -> Ref<'_>
     where
         C: 'static,
     {
+        #[cfg(debug_assertions)]
         let flag = self.flag::<C>(ty);
+        #[cfg(not(debug_assertions))]
+        let flag = self.flag_unchecked(ty);
 
         Ref::new(flag).unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))
     }
@@ -52,7 +62,10 @@ impl BorrowFlags {
     where
         C: 'static,
     {
+        #[cfg(debug_assertions)]
         let flag = self.flag::<C>(ty);
+        #[cfg(not(debug_assertions))]
+        let flag = self.flag_unchecked(ty);
 
         RefMut::new(flag)
             .unwrap_or_else(|| panic!("Component {} already borrowed", type_name::<C>()))

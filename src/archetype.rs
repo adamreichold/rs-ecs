@@ -185,8 +185,12 @@ impl Archetype {
     where
         C: 'static,
     {
+        self.find_impl(&TypeId::of::<C>())
+    }
+
+    fn find_impl(&self, key: &TypeId) -> Option<u16> {
         self.types
-            .binary_search_by_key(&TypeId::of::<C>(), |ty| ty.id)
+            .binary_search_by_key(key, |ty| ty.id)
             .map(|idx| idx as u16)
             .ok()
     }
@@ -219,23 +223,29 @@ impl Archetype {
 }
 
 impl Archetype {
-    unsafe fn type_metadata<C>(&self, ty: u16) -> &TypeMetadata
+    #[cfg(debug_assertions)]
+    fn type_metadata<C>(&self, ty: u16) -> &TypeMetadata
     where
         C: 'static,
     {
-        let ty = ty as usize;
-        debug_assert!(ty < self.types.len());
-        let ty = self.types.get_unchecked(ty);
-        debug_assert_eq!(ty.id, TypeId::of::<C>());
-
+        let ty = &self.types[ty as usize];
+        assert_eq!(ty.id, TypeId::of::<C>());
         ty
+    }
+
+    #[cfg(not(debug_assertions))]
+    unsafe fn type_metadata_unchecked(&self, ty: u16) -> &TypeMetadata {
+        self.types.get_unchecked(ty as usize)
     }
 
     pub unsafe fn base_pointer<C>(&self, ty: u16) -> *mut C
     where
         C: 'static,
     {
+        #[cfg(debug_assertions)]
         let ty = self.type_metadata::<C>(ty);
+        #[cfg(not(debug_assertions))]
+        let ty = self.type_metadata_unchecked(ty);
 
         ty.base_pointer.cast::<C>()
     }
@@ -244,10 +254,9 @@ impl Archetype {
     where
         C: 'static,
     {
-        debug_assert!(idx < self.len);
-
         let ptr = self.base_pointer::<C>(ty);
 
+        debug_assert!(idx < self.len);
         ptr.add(idx as usize)
     }
 }

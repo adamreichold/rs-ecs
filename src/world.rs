@@ -252,14 +252,13 @@ impl World {
 
         unsafe {
             let old_archetype = &mut self.archetypes[old_ty as usize];
-
             let old_comps = B1::read(old_archetype, old_idx);
-
             B2::drop::<B1>(old_archetype, old_idx);
 
             let new_idx = self.move_(ent.id, old_ty, new_ty, old_idx);
 
-            new_comps.write(&mut self.archetypes[new_ty as usize], new_idx);
+            let new_archetype = &mut self.archetypes[new_ty as usize];
+            new_comps.write(new_archetype, new_idx);
 
             Some(old_comps)
         }
@@ -359,9 +358,9 @@ impl World {
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         // allocate entity in other
-        let id = other.alloc_id();
+        let new_id = other.alloc_id();
 
-        let new_meta = &mut other.entities[id as usize];
+        let new_meta = &mut other.entities[new_id as usize];
 
         // free entity in self
         meta.bump_gen();
@@ -398,14 +397,12 @@ impl World {
 
         // fix entity component in other
         let ent = Entity {
-            id,
+            id: new_id,
             gen: new_meta.gen,
         };
 
         unsafe {
-            other.archetypes[new_meta.ty as usize]
-                .get::<Entity>(new_meta.idx)
-                .write(ent);
+            new_archetype.get::<Entity>(new_meta.idx).write(ent);
         }
 
         ent

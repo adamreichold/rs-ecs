@@ -4,6 +4,7 @@ use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
+use std::process::abort;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{
@@ -79,14 +80,15 @@ impl World {
         let id = self.alloc_id();
 
         let meta = &mut self.entities[id as usize];
+        let archetype = &mut self.archetypes[0];
 
         meta.ty = 0;
-        meta.idx = unsafe { self.archetypes[0].alloc() };
+        meta.idx = unsafe { archetype.alloc() };
 
         let ent = Entity { id, gen: meta.gen };
 
         unsafe {
-            self.archetypes[0].get::<Entity>(meta.idx).write(ent);
+            archetype.get::<Entity>(meta.idx).write(ent);
         }
 
         ent
@@ -292,7 +294,7 @@ impl World {
         types: TypeMetadataSet,
     ) -> u16 {
         let pos = archetypes
-            .iter_mut()
+            .iter()
             .position(|archetype| archetype.match_(&types));
 
         if let Some(pos) = pos {
@@ -574,7 +576,13 @@ impl Default for EntityMetadata {
 
 impl EntityMetadata {
     fn bump_gen(&mut self) {
-        self.gen = unsafe { NonZeroU32::new_unchecked(self.gen.get().checked_add(1).unwrap()) };
+        let gen = self.gen.get();
+
+        if gen == u32::MAX {
+            abort();
+        }
+
+        self.gen = unsafe { NonZeroU32::new_unchecked(gen + 1) };
     }
 }
 

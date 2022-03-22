@@ -148,6 +148,9 @@ impl World {
     }
 
     /// Remove all entites and their components from the world.
+    ///
+    /// Note that this will re-use the memory allocations but it will drop the meta-data
+    /// which implies that previously used [`Entity`] values will be repeated.
     pub fn clear(&mut self) {
         self.entities.clear();
         self.free_list.clear();
@@ -1143,6 +1146,23 @@ mod tests {
         assert_eq!(world.archetypes.len(), 2);
         assert_eq!(world.archetypes[0].len(), 0);
         assert_eq!(world.archetypes[1].len(), 0);
+    }
+
+    #[test]
+    fn clearing_the_world_repeats_entities() {
+        let mut world = World::new();
+
+        let ent = world.alloc();
+        assert_eq!(ent.id, 0);
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen.get(), 1);
+
+        world.clear();
+
+        let ent = world.alloc();
+        assert_eq!(ent.id, 0);
+        assert_eq!(world.entities.len(), 1);
+        assert_eq!(world.entities[0].gen.get(), 1);
     }
 
     #[test]

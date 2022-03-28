@@ -102,9 +102,6 @@ where
     ptrs: Box<[Option<<S::Fetch as Fetch<'static>>::Ptr>]>,
 }
 
-#[allow(clippy::non_send_fields_in_send_ty)]
-unsafe impl<S> Send for Query<S> where S: QuerySpec {}
-
 impl<S> Default for Query<S>
 where
     S: QuerySpec,
@@ -239,9 +236,45 @@ where
 
     #[cfg(feature = "rayon")]
     /// Create a parallel iterator over the entities matching the query.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// # use rayon::prelude::*;
+    /// use rayon::join;
+    ///
+    /// let mut world = World::new();
+    ///
+    /// let entity1 = world.alloc();
+    /// world.insert(entity1, (42_i32, 23_u32, 1.0_f32));
+    ///
+    /// let entity2 = world.alloc();
+    /// world.insert(entity2, (0_i32, true));
+    ///
+    /// let mut query1 = Query::<&mut i32>::new();
+    /// let mut ref1 = query1.borrow(&world);
+    /// let mut iter1 = ref1.iter();
+    ///
+    /// let mut query2 = Query::<(&u32, &mut f32)>::new();
+    /// let mut ref2 = query2.borrow(&world);
+    /// let mut iter2 = ref2.par_iter();
+    ///
+    /// join(
+    ///     move || {
+    ///         for i in iter1 {
+    ///             *i -= 1;
+    ///         }
+    ///     },
+    ///     move || {
+    ///         iter2.for_each(|(u, f)| {
+    ///             *f += *u as f32;
+    ///         });
+    ///     },
+    /// );
+    /// ```
     pub fn par_iter<'q>(&'q mut self) -> QueryParIter<'q, S>
     where
-        <S::Fetch as Fetch<'q>>::Ty: Send + Sync,
         <S::Fetch as Fetch<'q>>::Item: Send,
     {
         let comps: &'q [(u16, <S::Fetch as Fetch<'q>>::Ty)] = unsafe { transmute(self.comps) };
@@ -304,6 +337,13 @@ where
     idx: u32,
     len: u32,
     ptr: <S::Fetch as Fetch<'q>>::Ptr,
+}
+
+unsafe impl<'q, S> Send for QueryIter<'q, S>
+where
+    S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Item: Send,
+{
 }
 
 impl<'q, S> Iterator for QueryIter<'q, S>

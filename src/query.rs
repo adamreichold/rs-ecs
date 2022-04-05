@@ -102,6 +102,8 @@ where
     ptrs: Box<[Option<<S::Fetch as Fetch<'static>>::Ptr>]>,
 }
 
+unsafe impl<S> Send for Query<S> where S: QuerySpec {}
+
 impl<S> Default for Query<S>
 where
     S: QuerySpec,

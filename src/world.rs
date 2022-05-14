@@ -5,6 +5,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
 use std::ops::{Deref, DerefMut};
 use std::process::abort;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{
@@ -508,7 +509,7 @@ impl World {
         let flag = self.borrow_flags.find::<C>()?;
         let _ref = unsafe { self.borrow_flags.borrow::<C>(flag) };
 
-        let val = unsafe { &*archetype.pointer::<C>(comp, meta.idx) };
+        let val = unsafe { NonNull::new_unchecked(archetype.pointer::<C>(comp, meta.idx)) };
 
         Some(Comp { _ref, val })
     }
@@ -547,7 +548,7 @@ impl World {
         let flag = self.borrow_flags.find::<C>()?;
         let _ref = unsafe { self.borrow_flags.borrow_mut::<C>(flag) };
 
-        let val = unsafe { &mut *archetype.pointer::<C>(comp, meta.idx) };
+        let val = unsafe { NonNull::new_unchecked(archetype.pointer::<C>(comp, meta.idx)) };
 
         Some(CompMut { _ref, val })
     }
@@ -592,34 +593,34 @@ impl EntityMetadata {
 /// An immutable borrow of a component.
 pub struct Comp<'a, C> {
     _ref: Ref<'a>,
-    val: &'a C,
+    val: NonNull<C>,
 }
 
 impl<C> Deref for Comp<'_, C> {
     type Target = C;
 
     fn deref(&self) -> &C {
-        self.val
+        unsafe { self.val.as_ref() }
     }
 }
 
 /// A mutable borrow of a component.
 pub struct CompMut<'a, C> {
     _ref: RefMut<'a>,
-    val: &'a mut C,
+    val: NonNull<C>,
 }
 
 impl<C> Deref for CompMut<'_, C> {
     type Target = C;
 
     fn deref(&self) -> &C {
-        self.val
+        unsafe { self.val.as_ref() }
     }
 }
 
 impl<C> DerefMut for CompMut<'_, C> {
     fn deref_mut(&mut self) -> &mut C {
-        self.val
+        unsafe { self.val.as_mut() }
     }
 }
 
@@ -1009,6 +1010,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::let_unit_value)]
     fn empty_remove_is_essentially_a_noop() {
         let mut world = World::new();
 

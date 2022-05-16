@@ -403,6 +403,20 @@ where
     ptrs: &'q [Option<<S::Fetch as Fetch<'q>>::Ptr>],
 }
 
+unsafe impl<'q, S> Send for QueryMap<'q, S>
+where
+    S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Item: Send,
+{
+}
+
+unsafe impl<'q, S> Sync for QueryMap<'q, S>
+where
+    S: QuerySpec,
+    <S::Fetch as Fetch<'q>>::Item: Send,
+{
+}
+
 impl<S> QueryMap<'_, S>
 where
     S: QuerySpec,

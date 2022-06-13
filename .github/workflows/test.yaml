@@ -28,4 +28,4 @@ jobs:
         command: miri
         args: test
       env:
-        MIRIFLAGS: -Zmiri-tag-raw-pointers -Zmiri-check-number-validity
+        MIRIFLAGS: -Zmiri-strict-provenance

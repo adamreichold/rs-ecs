@@ -1,7 +1,7 @@
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::TypeId;
 use std::cmp::Reverse;
-use std::mem::{align_of, needs_drop};
+use std::mem::{align_of, needs_drop, transmute};
 use std::ptr::{copy_nonoverlapping, drop_in_place};
 use std::slice::from_raw_parts_mut;
 
@@ -25,7 +25,7 @@ impl Archetype {
             .unwrap_or(1);
 
         let layout = Layout::from_size_align(0, max_align).unwrap();
-        let ptr = max_align as *mut u8;
+        let ptr = invalid_ptr(max_align);
 
         Self {
             types: types.0.into(),
@@ -126,7 +126,7 @@ impl Archetype {
         let new_ptr = if new_layout.size() != 0 {
             unsafe { alloc(new_layout) }
         } else {
-            new_layout.align() as *mut u8
+            invalid_ptr(new_layout.align())
         };
         if new_ptr.is_null() {
             handle_alloc_error(new_layout);
@@ -307,7 +307,7 @@ impl TypeMetadata {
             id: TypeId::of::<C>(),
             layout: Layout::new::<C>(),
             drop: drop::<C>,
-            base_pointer: align_of::<C>() as *mut u8,
+            base_pointer: invalid_ptr(align_of::<C>()),
         }
     }
 }
@@ -342,6 +342,13 @@ impl TypeMetadataSet {
         self.0.remove(ty);
 
         Some(())
+    }
+}
+
+fn invalid_ptr(addr: usize) -> *mut u8 {
+    unsafe {
+        #[allow(clippy::useless_transmute)]
+        transmute(addr)
     }
 }
 

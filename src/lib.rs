@@ -36,7 +36,7 @@ mod world;
 pub use crate::{
     query::{Matches, Query, QueryIter, QueryMap, QueryRef, QuerySpec, With, Without},
     resources::{Res, ResMut, Resources},
-    world::{Comp, CompMut, Entity, World},
+    world::{Entity, QueryOne, World},
 };
 
 #[cfg(feature = "rayon")]

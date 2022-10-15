@@ -56,9 +56,9 @@ use crate::rayon::QueryParIter;
 ///     }
 /// }
 ///
-/// assert_eq!(*world.get::<i32>(entity1).unwrap(), 65);
-/// assert_eq!(*world.get::<f32>(entity1).unwrap(), 2.0);
-/// assert_eq!(*world.get::<i32>(entity2).unwrap(), -1);
+/// assert_eq!(*world.query_one::<&i32>(entity1).unwrap().get(), 65);
+/// assert_eq!(*world.query_one::<&f32>(entity1).unwrap().get(), 2.0);
+/// assert_eq!(*world.query_one::<&i32>(entity2).unwrap().get(), -1);
 /// ```
 ///
 /// Use of a prepared query that is stored and reused for optimization:
@@ -422,6 +422,8 @@ where
     S: QuerySpec,
 {
     /// Access the queried components of the given [Entity]
+    ///
+    /// Available only if the components do not include unique references.
     ///
     /// # Examples
     ///

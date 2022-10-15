@@ -198,8 +198,8 @@ fn get_component(bencher: &mut Bencher, spawn: fn(&mut World)) {
 
         let ent = *entities.next().unwrap();
 
-        let _pos = world.get_mut::<Pos>(ent).unwrap();
-        let _vel = world.get::<Vel>(ent);
+        let mut comp = world.query_one::<(&mut Pos, Option<&Vel>)>(ent).unwrap();
+        let (_pos, _vel) = comp.get_mut();
     });
 }
 

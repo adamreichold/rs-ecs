@@ -2,15 +2,15 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::mem::transmute_copy;
 use std::num::NonZeroU32;
-use std::ops::{Deref, DerefMut};
 use std::process::abort;
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{
     archetype::{Archetype, TypeMetadataSet},
-    borrow_flags::{BorrowFlags, Ref, RefMut},
+    borrow_flags::BorrowFlags,
+    query::{Fetch, FetchShared, QuerySpec},
 };
 
 /// The world storing entities and their components.
@@ -356,8 +356,8 @@ impl World {
     /// let mut another_world = World::new();
     /// let entity = world.transfer(entity, &mut another_world);
     ///
-    /// let comp = another_world.get::<String>(entity).unwrap();
-    /// assert_eq!(&*comp, "Goodbye");
+    /// let comp = another_world.query_one::<&String>(entity).unwrap();
+    /// assert_eq!(&*comp.get(), "Goodbye");
     /// ```
     pub fn transfer(&mut self, ent: Entity, other: &mut World) -> Entity {
         let meta = &mut self.entities[ent.id as usize];
@@ -481,7 +481,7 @@ impl World {
         self.archetypes[meta.ty as usize].find::<C>().is_some()
     }
 
-    /// Get an immutable reference to the component of the given type for an [Entity].
+    /// Access the components matching given query for an [Entity].
     ///
     /// Note that for repeated calls, [map](crate::QueryRef::map) can be used to amortize the set-up costs.
     ///
@@ -494,63 +494,34 @@ impl World {
     /// let entity = world.alloc();
     /// world.insert(entity, (42_u32, true));
     ///
-    /// let comp = world.get::<u32>(entity).unwrap();
+    /// {
+    ///     let mut comp = world.query_one::<&mut u32>(entity).unwrap();
+    ///     *comp.get_mut() = 42;
+    /// }
+    ///
+    /// let comp = world.query_one::<&u32>(entity).unwrap();
+    /// assert_eq!(*comp.get(), 42);
     /// ```
-    pub fn get<C>(&self, ent: Entity) -> Option<Comp<'_, C>>
+    pub fn query_one<S>(&self, ent: Entity) -> Option<QueryOne<S>>
     where
-        C: 'static,
+        S: QuerySpec,
     {
         let meta = &self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
-        let archetype = &self.archetypes[meta.ty as usize];
-        let comp = archetype.find::<C>()?;
-
-        let flag = self.borrow_flags.find::<C>()?;
-        let _ref = unsafe { self.borrow_flags.borrow::<C>(flag) };
-
-        let val = unsafe { NonNull::new_unchecked(archetype.pointer::<C>(comp, meta.idx)) };
-
-        Some(Comp { _ref, val })
-    }
-
-    /// Get a mutable reference to the component of the given type for an [Entity].
-    ///
-    /// Note that for repeated calls, [map](crate::QueryRef::map) can be used to amortize the set-up costs.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use rs_ecs::*;
-    /// let mut world = World::new();
-    ///
-    /// let entity = world.alloc();
-    /// world.insert(entity, (42_u32, true));
-    ///
-    /// let comp = world.get_mut::<u32>(entity).unwrap();
-    /// ```
-    pub fn get_mut<C>(&self, ent: Entity) -> Option<CompMut<'_, C>>
-    where
-        C: 'static,
-    {
-        assert_ne!(
-            TypeId::of::<C>(),
-            TypeId::of::<Entity>(),
-            "Entity cannot be accessed mutably"
-        );
-
-        let meta = &self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen, "Entity is stale");
+        let flags = S::Fetch::find_flags(&self.borrow_flags)?;
+        let _ref = unsafe { S::Fetch::borrow(&self.borrow_flags, flags) };
 
         let archetype = &self.archetypes[meta.ty as usize];
-        let comp = archetype.find::<C>()?;
 
-        let flag = self.borrow_flags.find::<C>()?;
-        let _ref = unsafe { self.borrow_flags.borrow_mut::<C>(flag) };
+        let comps = S::Fetch::find_comps(archetype)?;
+        let ptr = unsafe { S::Fetch::base_pointer(archetype, comps) };
 
-        let val = unsafe { NonNull::new_unchecked(archetype.pointer::<C>(comp, meta.idx)) };
-
-        Some(CompMut { _ref, val })
+        Some(QueryOne {
+            _ref,
+            ptr,
+            idx: meta.idx,
+        })
     }
 }
 
@@ -590,37 +561,33 @@ impl EntityMetadata {
     }
 }
 
-/// An immutable borrow of a component.
-pub struct Comp<'a, C> {
-    _ref: Ref<'a>,
-    val: NonNull<C>,
+/// Query to access the specified components of a single entity.
+pub struct QueryOne<'w, S>
+where
+    S: QuerySpec,
+{
+    _ref: <S::Fetch as Fetch<'w>>::Ref,
+    ptr: <S::Fetch as Fetch<'w>>::Ptr,
+    idx: u32,
 }
 
-impl<C> Deref for Comp<'_, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        unsafe { self.val.as_ref() }
+impl<S> QueryOne<'_, S>
+where
+    S: QuerySpec,
+{
+    /// Gain shared access to the specified components.
+    ///
+    /// Available only if the components do not include unique references.
+    pub fn get(&self) -> <S::Fetch as Fetch<'_>>::Item
+    where
+        S::Fetch: FetchShared,
+    {
+        unsafe { S::Fetch::deref(transmute_copy(&self.ptr), self.idx) }
     }
-}
 
-/// A mutable borrow of a component.
-pub struct CompMut<'a, C> {
-    _ref: RefMut<'a>,
-    val: NonNull<C>,
-}
-
-impl<C> Deref for CompMut<'_, C> {
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        unsafe { self.val.as_ref() }
-    }
-}
-
-impl<C> DerefMut for CompMut<'_, C> {
-    fn deref_mut(&mut self) -> &mut C {
-        unsafe { self.val.as_mut() }
+    /// Gain exclusive access to the specified components.
+    pub fn get_mut(&mut self) -> <S::Fetch as Fetch<'_>>::Item {
+        unsafe { S::Fetch::deref(transmute_copy(&self.ptr), self.idx) }
     }
 }
 
@@ -824,12 +791,13 @@ mod tests {
         let mut world = World::new();
 
         let ent = world.alloc();
+        world.insert(ent, (42,));
 
-        world.get::<Entity>(ent).unwrap();
+        world.query_one::<&i32>(ent).unwrap();
 
         world.free(ent);
 
-        world.get::<Entity>(ent).unwrap();
+        world.query_one::<&i32>(ent).unwrap();
     }
 
     #[test]
@@ -961,8 +929,8 @@ mod tests {
         world.insert(entity1, (1, SetOnDrop(drop2.clone())));
         world.insert(entity2, (2, SetOnDrop(drop3.clone())));
 
-        assert_eq!(*world.get::<i32>(entity1).unwrap(), 1);
-        assert_eq!(*world.get::<i32>(entity2).unwrap(), 2);
+        assert_eq!(*world.query_one::<&i32>(entity1).unwrap().get(), 1);
+        assert_eq!(*world.query_one::<&i32>(entity2).unwrap().get(), 2);
 
         assert_eq!(world.exchange_map.len(), 2);
         assert_eq!(
@@ -992,7 +960,7 @@ mod tests {
             .exchange::<(bool,), _>(entity, (1, SetOnDrop(drop2.clone())))
             .unwrap();
 
-        assert_eq!(*world.get::<i32>(entity).unwrap(), 1);
+        assert_eq!(*world.query_one::<&i32>(entity).unwrap().get(), 1);
         assert!(!world.contains::<bool>(entity));
 
         assert_eq!(world.exchange_map.len(), 2);
@@ -1044,8 +1012,8 @@ mod tests {
         let ent = world.alloc();
         world.insert(ent, (23,));
 
-        let comp = world.get::<i32>(ent).unwrap();
-        assert_eq!(*comp, 23);
+        let comp = world.query_one::<&i32>(ent).unwrap();
+        assert_eq!(*comp.get(), 23);
     }
 
     #[test]
@@ -1056,12 +1024,12 @@ mod tests {
         world.insert(ent, (23,));
 
         {
-            let mut comp = world.get_mut::<i32>(ent).unwrap();
-            *comp = 42;
+            let mut comp = world.query_one::<&mut i32>(ent).unwrap();
+            *comp.get_mut() = 42;
         }
 
-        let comp = world.get::<i32>(ent).unwrap();
-        assert_eq!(*comp, 42);
+        let comp = world.query_one::<&i32>(ent).unwrap();
+        assert_eq!(*comp.get(), 42);
     }
 
     #[test]
@@ -1071,8 +1039,8 @@ mod tests {
         let ent = world.alloc();
         world.insert(ent, ((),));
 
-        let _comp = world.get::<()>(ent).unwrap();
-        let _comp = world.get::<()>(ent).unwrap();
+        let _comp = world.query_one::<&()>(ent).unwrap();
+        let _comp = world.query_one::<&()>(ent).unwrap();
     }
 
     #[test]
@@ -1083,8 +1051,8 @@ mod tests {
         let ent = world.alloc();
         world.insert(ent, ((),));
 
-        let _comp = world.get_mut::<()>(ent);
-        let _comp = world.get_mut::<()>(ent).unwrap();
+        let _comp = world.query_one::<&mut ()>(ent).unwrap();
+        let _comp = world.query_one::<&mut ()>(ent).unwrap();
     }
 
     #[test]
@@ -1096,8 +1064,8 @@ mod tests {
         world.free(ent1);
         let ent3 = world.alloc();
 
-        assert_eq!(*world.get::<Entity>(ent2).unwrap(), ent2);
-        assert_eq!(*world.get::<Entity>(ent3).unwrap(), ent3);
+        assert_eq!(*world.query_one::<&Entity>(ent2).unwrap().get(), ent2);
+        assert_eq!(*world.query_one::<&Entity>(ent3).unwrap().get(), ent3);
     }
 
     #[test]
@@ -1106,7 +1074,7 @@ mod tests {
         let mut world = World::new();
 
         let ent = world.alloc();
-        let _ = world.get_mut::<Entity>(ent);
+        let _ = world.query_one::<&mut Entity>(ent);
     }
 
     #[test]
@@ -1185,8 +1153,8 @@ mod tests {
         assert!(!world1.exists(ent1));
         assert!(world2.exists(ent2));
 
-        let comp = world2.get::<i32>(ent2).unwrap();
-        assert_eq!(*comp, 23);
+        let comp = world2.query_one::<&i32>(ent2).unwrap();
+        assert_eq!(*comp.get(), 23);
     }
 
     #[cfg(not(miri))]

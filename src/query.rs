@@ -449,28 +449,26 @@ where
     /// assert_eq!(*i2, 23);
     /// assert_eq!(f2.copied(), None);
     /// ```
-    pub fn get<'m>(&'m self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item>
+    pub fn get(&self, ent: Entity) -> Option<<S::Fetch as Fetch>::Item>
     where
         S::Fetch: FetchShared,
     {
-        let meta = self.entities[ent.id as usize];
-        assert_eq!(ent.gen, meta.gen, "Entity is stale");
-
-        let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
-            unsafe { transmute(self.ptrs.get_unchecked(meta.ty as usize)) };
-
-        ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
+        unsafe { self.get_unchecked(ent) }
     }
 
     /// Exclusively access the queried components of the given [Entity]
-    pub fn get_mut<'m>(&'m mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
+    pub fn get_mut(&mut self, ent: Entity) -> Option<<S::Fetch as Fetch>::Item> {
+        unsafe { self.get_unchecked(ent) }
+    }
+
+    unsafe fn get_unchecked<'m>(&'m self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
         let meta = self.entities[ent.id as usize];
         assert_eq!(ent.gen, meta.gen, "Entity is stale");
 
         let ptr: &'m Option<<S::Fetch as Fetch<'m>>::Ptr> =
-            unsafe { transmute(self.ptrs.get_unchecked(meta.ty as usize)) };
+            transmute(self.ptrs.get_unchecked(meta.ty as usize));
 
-        ptr.map(|ptr| unsafe { S::Fetch::deref(ptr, meta.idx) })
+        ptr.map(|ptr| S::Fetch::deref(ptr, meta.idx))
     }
 }
 
@@ -482,9 +480,9 @@ pub trait QuerySpec {
 
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait Fetch<'q> {
-    type Ty: Copy;
+    type Ty: Copy + 'static;
     type Ref;
-    type Ptr: Copy;
+    type Ptr: Copy + 'static;
 
     type Item;
 

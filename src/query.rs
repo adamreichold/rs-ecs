@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::iter::FusedIterator;
 use std::marker::PhantomData;
-use std::mem::{transmute, transmute_copy};
+use std::mem::{transmute, transmute_copy, MaybeUninit};
 use std::ptr::NonNull;
 use std::slice::Iter;
 
@@ -459,6 +459,54 @@ where
     /// Exclusively access the queried components of the given [Entity]
     pub fn get_mut(&mut self, ent: Entity) -> Option<<S::Fetch as Fetch>::Item> {
         unsafe { self.get_unchecked(ent) }
+    }
+
+    /// Exclusively access the queried component of the given distinct entities
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity1 = world.alloc();
+    /// world.insert(entity1, (42_i32, 1.0_f32));
+    ///
+    /// let entity2 = world.alloc();
+    /// world.insert(entity2, (23_i32,));
+    ///
+    /// let mut query = Query::<&mut i32>::new();
+    /// let mut query = query.borrow(&world);
+    /// let mut query = query.map();
+    ///
+    /// let [i1, i2] = query.get_many_mut([entity1, entity2]);
+    ///
+    /// assert_eq!(*i1.unwrap(), 42);
+    /// assert_eq!(*i2.unwrap(), 23);
+    /// ```
+    pub fn get_many_mut<const N: usize>(
+        &mut self,
+        ent: [Entity; N],
+    ) -> [Option<<S::Fetch as Fetch>::Item>; N] {
+        let mut val = MaybeUninit::uninit();
+
+        let ptr = val.as_mut_ptr() as *mut Option<<S::Fetch as Fetch>::Item>;
+
+        for idx1 in 0..N {
+            for idx2 in 0..N {
+                if idx1 != idx2 {
+                    assert_ne!(ent[idx1], ent[idx2], "Duplicate entity");
+                }
+            }
+
+            unsafe {
+                let val = self.get_unchecked(ent[idx1]);
+
+                ptr.add(idx1).write(val);
+            }
+        }
+
+        unsafe { val.assume_init() }
     }
 
     unsafe fn get_unchecked<'m>(&'m self, ent: Entity) -> Option<<S::Fetch as Fetch<'m>>::Item> {
@@ -933,6 +981,7 @@ impl_fetch_for_tuples!(J, I, H, G, F, E, D, C, B, A);
 mod tests {
     use super::*;
 
+    use std::convert::TryInto;
     use std::mem::{forget, size_of};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1151,6 +1200,53 @@ mod tests {
         for ent in entities {
             query.get_mut(ent).unwrap();
         }
+    }
+
+    #[test]
+    fn map_enables_concurrent_access_to_multiple_entities() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let entities = Query::<&Entity>::new()
+            .borrow(&world)
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        let mut query = Query::<&mut i32>::new();
+        let mut query = query.borrow(&world);
+        let mut query = query.map();
+
+        let entities: [Entity; 3] = entities.try_into().unwrap();
+
+        let mut values = query.get_many_mut(entities);
+
+        for (index, value) in values.iter_mut().enumerate() {
+            **value.as_mut().unwrap() = index as i32;
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn map_prohibits_aliasing_via_concurrent_access() {
+        let mut world = World::new();
+
+        spawn_three(&mut world);
+
+        let entities = Query::<&Entity>::new()
+            .borrow(&world)
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        let mut query = Query::<&mut i32>::new();
+        let mut query = query.borrow(&world);
+        let mut query = query.map();
+
+        let entities = [entities[0], entities[1], entities[1]];
+
+        query.get_many_mut(entities);
     }
 
     #[test]

@@ -6,26 +6,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v3
       with:
         fetch-depth: 1
-    - uses: actions-rs/toolchain@v1
+    - uses: dtolnay/rust-toolchain@nightly
       with:
-        profile: minimal
-        toolchain: nightly
-        override: true
         components: miri, rust-src
-    - uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --all-features
-    - uses: actions-rs/cargo@v1
-      with:
-        command: miri
-        args: setup
-    - uses: actions-rs/cargo@v1
-      with:
-        command: miri
-        args: test
+    - run: cargo test --all-features
+    - run: cargo miri setup
+    - run: cargo miri test
       env:
         MIRIFLAGS: -Zmiri-strict-provenance

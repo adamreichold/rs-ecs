@@ -34,6 +34,7 @@ mod resources;
 mod world;
 
 pub use crate::{
+    archetype::Cloner,
     query::{Matches, Query, QueryIter, QueryMap, QueryRef, QuerySpec, With, Without},
     resources::{Res, ResMut, Resources},
     world::{Entity, QueryOne, World},

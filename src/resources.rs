@@ -137,10 +137,10 @@ impl<R> DerefMut for ResMut<'_, R> {
     }
 }
 
-type TypeIdMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
+pub type TypeIdMap<V> = HashMap<TypeId, V, BuildHasherDefault<TypeIdHasher>>;
 
 #[derive(Default)]
-struct TypeIdHasher(u64);
+pub struct TypeIdHasher(u64);
 
 impl Hasher for TypeIdHasher {
     fn write_u64(&mut self, val: u64) {

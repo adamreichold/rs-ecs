@@ -72,6 +72,17 @@ impl BorrowFlags {
     }
 }
 
+impl Clone for BorrowFlags {
+    fn clone(&self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|(id, _)| (*id, UnsafeCell::new(0)))
+                .collect(),
+        )
+    }
+}
+
 pub struct Ref<'a>(&'a UnsafeCell<isize>);
 
 impl<'a> Ref<'a> {

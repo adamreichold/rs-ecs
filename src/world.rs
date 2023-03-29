@@ -7,11 +7,20 @@ use std::num::NonZeroU32;
 use std::process::abort;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(feature = "serde")]
+use serde::{
+    ser::{SerializeMap, SerializeSeq, Serializer},
+    Serialize,
+};
+
 use crate::{
     archetype::{Archetype, TypeMetadataSet},
     borrow_flags::BorrowFlags,
     query::{Fetch, FetchShared, QuerySpec},
 };
+
+#[cfg(feature = "serde")]
+use crate::{archetype::ArchetypeSerializer, serde::ComponentSerializer};
 
 /// The world storing entities and their components.
 pub struct World {
@@ -527,12 +536,14 @@ impl World {
 
 /// An opaque entity identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Entity {
     pub(crate) id: u32,
     pub(crate) gen: NonZeroU32,
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct EntityMetadata {
     pub gen: NonZeroU32,
     pub ty: u16,
@@ -747,6 +758,63 @@ impl Hasher for IndexTagHasher {
 
     fn finish(&self) -> u64 {
         self.0.wrapping_mul(0x517cc1b727220a95)
+    }
+}
+
+/// TODO
+#[cfg(feature = "serde")]
+pub struct WorldSerializer<'a> {
+    /// TODO
+    pub world: &'a World,
+    /// TODO
+    pub serializer: &'a ComponentSerializer,
+}
+
+#[cfg(feature = "serde")]
+impl<'a> Serialize for WorldSerializer<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(3))?;
+
+        map.serialize_entry("entities", &self.world.entities)?;
+        map.serialize_entry("free_list", &self.world.free_list)?;
+
+        map.serialize_entry(
+            "archetypes",
+            &ArchetypeSetSerializer {
+                archetypes: &self.world.archetypes[1..],
+                serializer: self.serializer,
+            },
+        )?;
+
+        map.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+struct ArchetypeSetSerializer<'a> {
+    archetypes: &'a [Archetype],
+    serializer: &'a ComponentSerializer,
+}
+
+#[cfg(feature = "serde")]
+impl<'a> Serialize for ArchetypeSetSerializer<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.archetypes.len()))?;
+
+        for archetype in self.archetypes {
+            seq.serialize_element(&ArchetypeSerializer {
+                archetype,
+                serializer: self.serializer,
+            })?;
+        }
+
+        seq.end()
     }
 }
 

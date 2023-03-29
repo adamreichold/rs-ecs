@@ -48,4 +48,7 @@ pub use crate::rayon::QueryParIter;
 #[cfg(feature = "serde")]
 mod serde;
 
-// TODO pub use
+#[cfg(feature = "serde")]
+pub use crate::serde::ComponentSerializer;
+#[cfg(feature = "serde")]
+pub use crate::world::WorldSerializer;

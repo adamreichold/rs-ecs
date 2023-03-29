@@ -5,6 +5,12 @@ use std::mem::{align_of, needs_drop, transmute};
 use std::ptr::{copy_nonoverlapping, drop_in_place};
 use std::slice::from_raw_parts_mut;
 
+#[cfg(feature = "serde")]
+use serde::ser::{Serialize, SerializeMap, Serializer};
+
+#[cfg(feature = "serde")]
+use crate::serde::ComponentSerializer;
+
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
     layout: Layout,
@@ -349,6 +355,35 @@ fn invalid_ptr(addr: usize) -> *mut u8 {
     unsafe {
         #[allow(clippy::useless_transmute)]
         transmute(addr)
+    }
+}
+
+#[cfg(feature = "serde")]
+pub struct ArchetypeSerializer<'a> {
+    pub archetype: &'a Archetype,
+    pub serializer: &'a ComponentSerializer,
+}
+
+#[cfg(feature = "serde")]
+impl<'a> Serialize for ArchetypeSerializer<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.archetype.types.len()))?;
+
+        for ty in &*self.archetype.types {
+            unsafe {
+                self.serializer.serialize_component(
+                    &ty.id,
+                    ty.base_pointer,
+                    self.archetype.len,
+                    &mut map,
+                )?;
+            }
+        }
+
+        map.end()
     }
 }
 

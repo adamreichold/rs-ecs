@@ -8,7 +8,7 @@ use std::process::abort;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{
-    archetype::{Archetype, TypeMetadataSet},
+    archetype::{Archetype, Cloner, TypeMetadataSet},
     borrow_flags::BorrowFlags,
     query::{Fetch, FetchShared, QuerySpec},
 };
@@ -522,6 +522,52 @@ impl World {
             ptr,
             idx: meta.idx,
         })
+    }
+}
+
+impl World {
+    /// Creates a copy of the [`World`]
+    ///
+    /// This requires that all component types are available in the given [`cloner`][Cloner].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let ent = world.alloc();
+    /// world.insert(ent, (42, "foo".to_owned(),));
+    ///
+    /// let mut cloner = Cloner::new();
+    ///
+    /// cloner.add_copyable::<i32>();
+    /// cloner.add_cloneable::<String>();
+    ///
+    /// let snapshot = world.clone(&cloner);
+    ///
+    /// let mut comp = world.query_one::<&mut String>(ent).unwrap();
+    /// *comp.get_mut() = "bar".to_owned();
+    ///
+    /// let comp = snapshot.query_one::<&String>(ent).unwrap();
+    /// assert_eq!(*comp.get(), "foo");
+    /// ```
+    pub fn clone(&mut self, cloner: &Cloner) -> Self {
+        let archetypes = self
+            .archetypes
+            .iter_mut()
+            .map(|archetype| archetype.clone(cloner))
+            .collect();
+
+        Self {
+            tag: tag(),
+            entities: self.entities.clone(),
+            free_list: self.free_list.clone(),
+            borrow_flags: self.borrow_flags.clone(),
+            archetypes,
+            exchange_map: self.exchange_map.clone(),
+            transfer_map: self.transfer_map.clone(),
+        }
     }
 }
 
@@ -1155,6 +1201,30 @@ mod tests {
 
         let comp = world2.query_one::<&i32>(ent2).unwrap();
         assert_eq!(*comp.get(), 23);
+    }
+
+    #[test]
+    fn worlds_can_be_cloned() {
+        let mut world1 = World::new();
+
+        let ent = world1.alloc();
+        world1.insert(ent, (23, true, 42.0));
+        world1.insert(ent, ("foobar".to_owned(),));
+
+        let mut cloner = Cloner::new();
+
+        cloner.add_copyable::<i32>();
+        cloner.add_copyable::<bool>();
+        cloner.add_copyable::<f64>();
+        cloner.add_cloneable::<String>();
+
+        let world2 = world1.clone(&cloner);
+
+        assert!(world1.exists(ent));
+        assert!(world2.exists(ent));
+
+        let comp = world2.query_one::<&String>(ent).unwrap();
+        assert_eq!(*comp.get(), "foobar");
     }
 
     #[cfg(not(miri))]

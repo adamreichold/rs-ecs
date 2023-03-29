@@ -5,6 +5,8 @@ use std::mem::{align_of, needs_drop, transmute};
 use std::ptr::{copy_nonoverlapping, drop_in_place};
 use std::slice::from_raw_parts_mut;
 
+use crate::{resources::TypeIdMap, world::Entity};
+
 pub struct Archetype {
     types: Box<[TypeMetadata]>,
     layout: Layout,
@@ -123,14 +125,7 @@ impl Archetype {
 
         let new_layout = Layout::from_size_align(new_size, self.layout.align()).unwrap();
 
-        let new_ptr = if new_layout.size() != 0 {
-            unsafe { alloc(new_layout) }
-        } else {
-            invalid_ptr(new_layout.align())
-        };
-        if new_ptr.is_null() {
-            handle_alloc_error(new_layout);
-        }
+        let new_ptr = alloc_ptr(new_layout);
 
         unsafe {
             for (ty, new_offset) in types.0.iter_mut().zip(&new_offsets) {
@@ -286,6 +281,38 @@ impl Archetype {
     }
 }
 
+impl Archetype {
+    pub fn clone(&mut self, cloner: &Cloner) -> Self {
+        let ptr = alloc_ptr(self.layout);
+
+        let mut types = self.types.clone();
+
+        unsafe {
+            for ty in &mut *types {
+                let clone = cloner
+                    .clone
+                    .get(&ty.id)
+                    .expect("Component type missing from cloner");
+
+                let offset = ty.base_pointer.offset_from(self.ptr);
+                let new_base_pointer = ptr.offset(offset);
+
+                clone(ty.base_pointer, new_base_pointer, self.len as usize);
+
+                ty.base_pointer = new_base_pointer;
+            }
+        }
+
+        Self {
+            types,
+            layout: self.layout,
+            len: self.len,
+            cap: self.cap,
+            ptr,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct TypeMetadata {
     id: TypeId,
@@ -345,10 +372,91 @@ impl TypeMetadataSet {
     }
 }
 
+fn alloc_ptr(layout: Layout) -> *mut u8 {
+    let ptr = if layout.size() != 0 {
+        unsafe { alloc(layout) }
+    } else {
+        invalid_ptr(layout.align())
+    };
+
+    if !ptr.is_null() {
+        ptr
+    } else {
+        handle_alloc_error(layout);
+    }
+}
+
 fn invalid_ptr(addr: usize) -> *mut u8 {
     unsafe {
         #[allow(clippy::useless_transmute)]
         transmute(addr)
+    }
+}
+
+/// Collects component types which can be cloned or copied
+pub struct Cloner {
+    clone: TypeIdMap<unsafe fn(*const u8, *mut u8, usize)>,
+}
+
+impl Cloner {
+    /// Creates a new cloner which contains only the [`Entity`] component type
+    pub fn new() -> Self {
+        let mut _self = Self {
+            clone: Default::default(),
+        };
+
+        _self.add_copyable::<Entity>();
+
+        _self
+    }
+}
+
+impl Default for Cloner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Cloner {
+    /// Adds a component type which is cloneable
+    ///
+    /// If `C` is actually copyable, using [`add_copyable`] is more efficient.
+    pub fn add_cloneable<C>(&mut self)
+    where
+        C: Clone + 'static,
+    {
+        unsafe fn clone<C>(src: *const u8, dst: *mut u8, len: usize)
+        where
+            C: Clone,
+        {
+            let src = src.cast::<C>();
+            let dst = dst.cast::<C>();
+
+            for idx in 0..len {
+                let val = (*src.add(idx)).clone();
+                dst.add(idx).write(val);
+            }
+        }
+
+        self.clone.insert(TypeId::of::<C>(), clone::<C>);
+    }
+
+    /// Adds a component type which is copyable
+    pub fn add_copyable<C>(&mut self)
+    where
+        C: Copy + 'static,
+    {
+        unsafe fn clone<C>(src: *const u8, dst: *mut u8, len: usize)
+        where
+            C: Copy,
+        {
+            let src = src.cast::<C>();
+            let dst = dst.cast::<C>();
+
+            copy_nonoverlapping(src, dst, len);
+        }
+
+        self.clone.insert(TypeId::of::<C>(), clone::<C>);
     }
 }
 

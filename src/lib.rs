@@ -44,3 +44,8 @@ mod rayon;
 
 #[cfg(feature = "rayon")]
 pub use crate::rayon::QueryParIter;
+
+#[cfg(feature = "serde")]
+mod serde;
+
+// TODO pub use

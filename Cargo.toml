@@ -1,12 +1,16 @@
 [package]
 name = "rs-ecs"
 description = "reasonably simple entity component system"
-version = "0.7.3"
+version = "0.7.4"
 edition = "2018"
 rust-version = "1.51"
 authors = ["Adam Reichold <adam.reichold@t-online.de>"]
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+documentation = "https://docs.rs/rs-ecs"
 repository = "https://github.com/adamreichold/rs-ecs"
+keywords = ["ecs"]
+categories = ["data-structures", "simulation"]
 
 [dependencies]
 rayon = { version = "1.5", optional = true }

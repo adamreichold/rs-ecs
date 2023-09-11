@@ -286,7 +286,7 @@ where
 
     /// Create a map of the entities matching the query.
     ///
-    /// This is an alternative to [get](World::get) and [get_mut](World::get_mut) for repeated calls, to amortize the set-up costs.
+    /// This is an alternative to [`query_one`](World::query_one) for repeated calls, to amortize the set-up costs of random access.
     ///
     /// # Examples
     ///

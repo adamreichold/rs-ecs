@@ -192,6 +192,7 @@ impl Archetype {
 }
 
 impl Archetype {
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub unsafe fn move_(src: &mut Self, dst: &mut Self, src_idx: u32, dst_idx: u32) {
         debug_assert!(src_idx < src.len);
         debug_assert!(dst_idx < dst.len);
@@ -394,6 +395,8 @@ fn invalid_ptr(addr: usize) -> *mut u8 {
 }
 
 /// Collects component types which can be cloned or copied
+///
+/// Populating such an object with all used component types is required to use [`World::clone`][crate::World::clone].
 pub struct Cloner {
     clone: TypeIdMap<unsafe fn(*const u8, *mut u8, usize)>,
 }
@@ -420,7 +423,7 @@ impl Default for Cloner {
 impl Cloner {
     /// Adds a component type which is cloneable
     ///
-    /// If `C` is actually copyable, using [`add_copyable`] is more efficient.
+    /// If `C` is actually copyable, using [`add_copyable`][Self::add_copyable] is more efficient.
     pub fn add_cloneable<C>(&mut self)
     where
         C: Clone + 'static,

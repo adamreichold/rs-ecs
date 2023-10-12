@@ -374,17 +374,15 @@ impl TypeMetadataSet {
 }
 
 fn alloc_ptr(layout: Layout) -> *mut u8 {
-    let ptr = if layout.size() != 0 {
-        unsafe { alloc(layout) }
-    } else {
-        invalid_ptr(layout.align())
-    };
+    if layout.size() == 0 {
+        return invalid_ptr(layout.align());
+    }
 
-    if !ptr.is_null() {
-        ptr
-    } else {
+    let ptr = unsafe { alloc(layout) };
+    if ptr.is_null() {
         handle_alloc_error(layout);
     }
+    ptr
 }
 
 fn invalid_ptr(addr: usize) -> *mut u8 {

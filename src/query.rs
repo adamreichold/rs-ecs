@@ -421,6 +421,39 @@ impl<S> QueryMap<'_, S>
 where
     S: QuerySpec,
 {
+    /// Check if an [Entity] is present in the map.
+    ///
+    /// In contrast to [`get`][Self::get], this does not require a `S::Fetch: FetchShared` bound.
+    /// In contrast to [`get_mut`][Self::get_mut] however, a shared borrow is sufficient.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use rs_ecs::*;
+    /// let mut world = World::new();
+    ///
+    /// let entity1 = world.alloc();
+    /// world.insert(entity1, (42_i32, 1.0_f32));
+    ///
+    /// let entity2 = world.alloc();
+    /// world.insert(entity2, (2.0_f32,));
+    ///
+    /// let mut query = Query::<(&i32, Option<&f32>)>::new();
+    /// let mut query = query.borrow(&world);
+    /// let query = query.map();
+    ///
+    /// assert!(query.contains(entity1));
+    /// assert!(!query.contains(entity2));
+    /// ```
+    pub fn contains(&self, ent: Entity) -> bool {
+        let meta = self.entities[ent.id as usize];
+        assert_eq!(ent.gen, meta.gen, "Entity is stale");
+
+        let ptr = unsafe { self.ptrs.get_unchecked(meta.ty as usize) };
+
+        ptr.is_some()
+    }
+
     /// Access the queried components of the given [Entity]
     ///
     /// Available only if the components do not include unique references.

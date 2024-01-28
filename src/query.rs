@@ -525,17 +525,15 @@ where
 
         let ptr = val.as_mut_ptr() as *mut Option<<S::Fetch as Fetch>::Item>;
 
-        for idx1 in 0..N {
-            for idx2 in 0..N {
-                if idx1 != idx2 {
-                    assert_ne!(ent[idx1], ent[idx2], "Duplicate entity");
-                }
+        for idx in 0..N {
+            for idx1 in (idx + 1)..N {
+                assert_ne!(ent[idx], ent[idx1], "Duplicate entity");
             }
 
             unsafe {
-                let val = self.get_unchecked(ent[idx1]);
+                let val = self.get_unchecked(ent[idx]);
 
-                ptr.add(idx1).write(val);
+                ptr.add(idx).write(val);
             }
         }
 

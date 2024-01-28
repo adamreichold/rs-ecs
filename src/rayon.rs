@@ -357,8 +357,8 @@ mod tests {
 
     use crate::{query::Query, world::World};
 
-    struct Pos(f32);
-    struct Vel(f32);
+    struct Pos(#[allow(dead_code)] f32);
+    struct Vel(#[allow(dead_code)] f32);
 
     fn spawn_two<const N: usize>(world: &mut World) {
         let ent = world.alloc();

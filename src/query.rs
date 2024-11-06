@@ -577,7 +577,7 @@ pub unsafe trait Fetch<'q> {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait FetchShared {}
 
-impl<'a, C> QuerySpec for &'a C
+impl<C> QuerySpec for &C
 where
     C: 'static,
 {
@@ -623,7 +623,7 @@ where
 
 unsafe impl<C> FetchShared for FetchRead<C> {}
 
-impl<'a, C> QuerySpec for &'a mut C
+impl<C> QuerySpec for &mut C
 where
     C: 'static,
 {

@@ -502,7 +502,7 @@ impl World {
     /// let comp = world.query_one::<&u32>(entity).unwrap();
     /// assert_eq!(*comp.get(), 42);
     /// ```
-    pub fn query_one<S>(&self, ent: Entity) -> Option<QueryOne<S>>
+    pub fn query_one<S>(&self, ent: Entity) -> Option<QueryOne<'_, S>>
     where
         S: QuerySpec,
     {

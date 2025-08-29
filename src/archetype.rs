@@ -387,7 +387,7 @@ fn alloc_ptr(layout: Layout) -> *mut u8 {
 
 fn invalid_ptr(addr: usize) -> *mut u8 {
     unsafe {
-        #[allow(clippy::useless_transmute)]
+        #[allow(integer_to_ptr_transmutes, clippy::useless_transmute)]
         transmute(addr)
     }
 }

@@ -163,7 +163,9 @@ where
         QueryRef {
             world,
             _ref,
+            #[allow(clippy::missing_transmute_annotations)]
             comps: unsafe { transmute(&*self.comps) },
+            #[allow(clippy::missing_transmute_annotations)]
             ptrs: unsafe { transmute(&mut *self.ptrs) },
         }
     }
@@ -482,7 +484,7 @@ where
     /// assert_eq!(*i2, 23);
     /// assert_eq!(f2.copied(), None);
     /// ```
-    pub fn get(&self, ent: Entity) -> Option<<S::Fetch as Fetch>::Item>
+    pub fn get(&self, ent: Entity) -> Option<<S::Fetch as Fetch<'_>>::Item>
     where
         S::Fetch: FetchShared,
     {
@@ -490,7 +492,7 @@ where
     }
 
     /// Exclusively access the queried components of the given [Entity]
-    pub fn get_mut(&mut self, ent: Entity) -> Option<<S::Fetch as Fetch>::Item> {
+    pub fn get_mut(&mut self, ent: Entity) -> Option<<S::Fetch as Fetch<'_>>::Item> {
         unsafe { self.get_unchecked(ent) }
     }
 
@@ -520,7 +522,7 @@ where
     pub fn get_many_mut<const N: usize>(
         &mut self,
         ent: [Entity; N],
-    ) -> [Option<<S::Fetch as Fetch>::Item>; N] {
+    ) -> [Option<<S::Fetch as Fetch<'_>>::Item>; N] {
         let mut val = MaybeUninit::uninit();
 
         let ptr = val.as_mut_ptr() as *mut Option<<S::Fetch as Fetch>::Item>;

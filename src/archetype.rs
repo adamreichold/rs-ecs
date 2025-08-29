@@ -2,8 +2,7 @@ use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use std::any::TypeId;
 use std::cmp::Reverse;
 use std::mem::{align_of, needs_drop, transmute};
-use std::ptr::{copy_nonoverlapping, drop_in_place};
-use std::slice::from_raw_parts_mut;
+use std::ptr::{copy_nonoverlapping, drop_in_place, slice_from_raw_parts_mut};
 
 use crate::{resources::TypeIdMap, world::Entity};
 
@@ -328,7 +327,7 @@ impl TypeMetadata {
         C: 'static,
     {
         unsafe fn drop<C>(ptr: *mut u8, len: usize) {
-            drop_in_place(from_raw_parts_mut(ptr.cast::<C>(), len))
+            drop_in_place(slice_from_raw_parts_mut(ptr.cast::<C>(), len))
         }
 
         Self {
@@ -387,7 +386,7 @@ fn alloc_ptr(layout: Layout) -> *mut u8 {
 
 fn invalid_ptr(addr: usize) -> *mut u8 {
     unsafe {
-        #[allow(clippy::useless_transmute)]
+        #[allow(integer_to_ptr_transmutes)]
         transmute(addr)
     }
 }

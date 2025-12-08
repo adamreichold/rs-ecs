@@ -57,9 +57,11 @@ impl Archetype {
     pub unsafe fn free<const DROP: bool>(&mut self, idx: u32) -> bool {
         if DROP {
             for ty in &*self.types {
-                let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
+                if let Some(drop) = ty.drop {
+                    let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 
-                (ty.drop)(ptr, 1);
+                    drop(ptr, 1);
+                }
             }
         }
 
@@ -86,8 +88,10 @@ impl Archetype {
         self.len = 0;
 
         for ty in &*self.types {
-            unsafe {
-                (ty.drop)(ty.base_pointer, len as usize);
+            if let Some(drop) = ty.drop {
+                unsafe {
+                    drop(ty.base_pointer, len as usize);
+                }
             }
         }
     }
@@ -275,7 +279,7 @@ impl Archetype {
 
                 let ptr = ty.base_pointer.add(ty.layout.size() * idx as usize);
 
-                (ty.drop)(ptr, 1);
+                (ty.drop.unwrap())(ptr, 1);
             }
         }
     }
@@ -317,7 +321,7 @@ impl Archetype {
 struct TypeMetadata {
     id: TypeId,
     layout: Layout,
-    drop: unsafe fn(*mut u8, usize),
+    drop: Option<unsafe fn(*mut u8, usize)>,
     base_pointer: *mut u8,
 }
 
@@ -333,7 +337,11 @@ impl TypeMetadata {
         Self {
             id: TypeId::of::<C>(),
             layout: Layout::new::<C>(),
-            drop: drop::<C>,
+            drop: if needs_drop::<C>() {
+                Some(drop::<C>)
+            } else {
+                None
+            },
             base_pointer: invalid_ptr(align_of::<C>()),
         }
     }

@@ -14,6 +14,8 @@ pub struct Archetype {
     ptr: *mut u8,
 }
 
+unsafe impl Send for Archetype {}
+
 impl Archetype {
     pub fn new(types: TypeMetadataSet) -> Self {
         assert!(types.0.len() <= u16::MAX as usize);

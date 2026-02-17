@@ -1,3 +1,7 @@
+This repository was moved to <https://codeberg.org/adamreichold/rs-ecs>.
+
+---
+
 # rs-ecs
 
 [![crates.io](https://img.shields.io/crates/v/rs-ecs.svg)](https://crates.io/crates/rs-ecs)
